@@ -1,0 +1,123 @@
+FROM ubuntu:23.04
+
+ENV PYTHON_VERSION=3.11.5
+
+LABEL description \
+    "A docker for playing with GStreamer with all video codecs built. \
+    Release 1.0.1: upgrade to ubuntu23 to have gstreamer1.22 to work with webrtc* elements. Also added rust/npm dependencies for gst-rs project."
+LABEL maintainer "Nikita Smirnov <nsm@informatik.uni-kiel.de>"
+LABEL version "1.0.1"
+
+WORKDIR /tmp
+
+RUN apt-get update -y && apt-get upgrade -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
+    autoconf autotools-dev automake bison build-essential ca-certificates cmake curl bzip2 libexpat1-dev libgomp1 git g++ gcc gperf flex libtool libboost-dev libnss3 libssl-dev  \
+    make nasm perl pkg-config python3-dev python3-pip qtbase5-dev strace tar tzdata v4l-utils x11-xserver-utils yasm wget zlib1g-dev \
+    gobject-introspection libgirepository1.0-dev
+
+# for building
+RUN ldconfig && pip install --break-system-packages --upgrade pip && pip install --break-system-packages meson ninja
+
+# BUILD NETFLIX VMAF (FOR VOQ METRICS)
+RUN git clone https://github.com/Netflix/vmaf.git && \
+    cd vmaf/libvmaf && \
+    meson build --buildtype release && \
+    ninja -vC build && \
+    ninja -vC build install
+ENV LD_LIBRARY_PATH $LD_LIBRARY_PATH:/usr/local/lib/x86_64-linux-gnu/
+
+# BUILD VIDEO ENCODERS/DECODERS
+#x264
+RUN git -C x264 pull 2> /dev/null || git clone --depth 1 https://code.videolan.org/videolan/x264.git && \
+    cd x264 && \
+    ./configure --enable-shared --enable-pic && \
+    make -j${nproc} && make install
+#x265
+RUN apt-get -y install libnuma-dev && wget -O x265.tar.bz2 https://bitbucket.org/multicoreware/x265_git/get/master.tar.bz2 && tar xjvf x265.tar.bz2 && \
+    cd multicoreware*/build/linux && \
+    cmake -G "Unix Makefiles" -DENABLE_SHARED=on ../../source && \
+    make -j${nproc} && make install
+#vpx:8,9
+RUN git -C libvpx pull 2> /dev/null || git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git && \
+    cd libvpx && \
+    ./configure --disable-examples --disable-unit-tests --enable-vp9-highbitdepth --enable-pic --as=yasm && \
+    make -j${nproc} && make install
+#aom:av1 encoder/decoder
+RUN git -C aom pull 2> /dev/null || git clone --depth 1 https://aomedia.googlesource.com/aom && \
+    mkdir -p aom_build && \
+    cd aom_build && \
+    cmake -G "Unix Makefiles" -DENABLE_TESTS=OFF -DENABLE_NASM=on ../aom && \
+    make -j${nproc} && make install
+#av1 decoder
+RUN git -C dav1d pull 2> /dev/null || git clone --depth 1 https://code.videolan.org/videolan/dav1d.git && \
+    mkdir -p dav1d/build && \
+    cd dav1d/build && \
+    meson setup -Denable_tools=false -Denable_tests=false .. && \
+    ninja && ninja install
+#av1 encoder
+RUN git -C SVT-AV1 pull 2> /dev/null || git clone https://gitlab.com/AOMediaCodec/SVT-AV1.git && \
+    mkdir -p SVT-AV1/build && cd SVT-AV1/build && \
+    cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_DEC=OFF -DBUILD_SHARED_LIBS=OFF .. && \
+    make -j${nproc} && make install
+
+# INSTALL GSTREAMER
+RUN apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly gstreamer1.0-nice gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio
+
+
+# ADD X11 SUPPORT TO WORK WITH OBS STUDIO GUI
+RUN apt-get update -y \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server dbus-x11 xauth xorg xpra apt-transport-https software-properties-common ca-certificates \
+    && mkdir /var/run/sshd \
+    && mkdir /root/.ssh \
+    && chmod 700 /root/.ssh \
+    && ssh-keygen -A \
+    && sed -i "s/^.*PasswordAuthentication.*$/PasswordAuthentication no/" /etc/ssh/sshd_config \
+    && sed -i "s/^.*X11Forwarding.*$/X11Forwarding yes/" /etc/ssh/sshd_config \
+    && sed -i "s/^.*X11UseLocalhost.*$/X11UseLocalhost no/" /etc/ssh/sshd_config \
+    && grep "^X11UseLocalhost" /etc/ssh/sshd_config || echo "X11UseLocalhost no" >> /etc/ssh/sshd_config \
+    && echo "export NO_AT_BRIDGE=1" >> ~/.bashrc
+ENV DISPLAY :0
+
+# PYTHON
+# INSTALL PYENV 
+WORKDIR /root/
+RUN git clone --depth=1 https://github.com/pyenv/pyenv.git .pyenv
+ENV PYENV_ROOT="/root/.pyenv"
+ENV PATH="${PYENV_ROOT}/shims:${PYENV_ROOT}/bin:${PATH}"
+
+# INSTALL OK PYTHON WITH PYENV
+RUN apt-get clean && apt-get update && apt-get install -y libbz2-dev libncurses5 libncurses5-dev libncursesw5 tk-dev libreadline-dev libsqlite3-dev python3-testresources swig
+RUN pyenv install ${PYTHON_VERSION} && pyenv global ${PYTHON_VERSION}
+
+# INSTALL POETRY
+RUN mkdir -p /root/poetry && \
+    curl -sSL https://install.python-poetry.org | POETRY_HOME=/root/.poetry python -
+ENV PATH="/root/.poetry/bin:${PATH}"
+
+# INSTALL RUST
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# INSTALL SOME SHIT FOR THE GST RUST PROJECT
+RUN curl -sL https://deb.nodesource.com/setup_16.x | bash -s -- -y
+RUN apt-get update && apt-get install -y --fix-missing npm rust-src libnice-dev libpango1.0-dev libcairo2-dev webpack
+
+# INSTALL GST PYTHON BINDINGS
+RUN apt-get update && apt-get install -y python3-gst-1.0 python-gi-dev python3-gi gstreamer1.0-python3-plugin-loader
+
+# INSTALL ADDITIONAL LIBRARIES
+RUN pip install --break-system-packages aiortc uvloop
+
+# CLEANUP
+RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# CLONE & BUILD GST-PLUGINS-RS PROJECT
+WORKDIR /home
+RUN git clone https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs.git && cd gst-plugins-rs && cargo build
+ENV GST_PLUGIN_PATH="/home/gst-plugins-rs/target/debug:${GST_PLUGIN_PATH}"
+
+# CLONE GSTWEBRTCAPP
+WORKDIR /home
+RUN git clone https://github.com/gehirndienst/gstwebrtcapp.git
