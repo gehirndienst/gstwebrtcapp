@@ -29,7 +29,7 @@ from gi.repository import GstWebRTC
 from gi.repository import Gst
 
 from ahoyapp.app import GstWebRTCBinApp, GstWebRTCBinAppConfig
-from ahoyapp.utils import LOGGER, stats_to_dict, wait_for_condition, async_wait_for_condition
+from utils.utils import LOGGER, stats_to_dict, wait_for_condition, async_wait_for_condition
 
 
 class AhoyConnector:
@@ -239,6 +239,9 @@ class AhoyConnector:
         if ahoy_transceiver is None:
             LOGGER.error(f"ERROR: _add_transceiver callback, failed to retrieve a newly added transceiver")
             self.terminate_webrtc_coro()
+        else:
+            ahoy_transceiver.set_property('do-nack', True)
+            ahoy_transceiver.set_property("fec-type", GstWebRTC.WebRTCFECType.ULP_RED)
         self._app.transceivers.append(ahoy_transceiver)
 
         LOGGER.info(

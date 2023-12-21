@@ -24,7 +24,7 @@ gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
 from gi.repository import GstWebRTC
 
-from ahoyapp.utils import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
+from utils.utils import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
 
 DEFAULT_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
@@ -148,7 +148,7 @@ class GstWebRTCBinApp:
             self.is_running = True
         logging.info("OK: pipeline is PLAYING")
 
-    def get_transceivers(self, do_nack: bool = True) -> List[GstWebRTC.WebRTCRTPTransceiver]:
+    def get_transceivers(self) -> List[GstWebRTC.WebRTCRTPTransceiver]:
         if len(self.transceivers) > 0:
             return self.transceivers
         else:
@@ -159,9 +159,9 @@ class GstWebRTCBinApp:
                 while True:
                     transceiver = self.webrtcbin.emit('get-transceiver', index)
                     if transceiver:
+                        transceiver.set_property("do-nack", True)
+                        transceiver.set_property("fec-type", GstWebRTC.WebRTCFECType.ULP_RED)
                         self.transceivers.append(transceiver)
-                        if do_nack:
-                            transceiver.set_property("do-nack", True)
                         index += 1
                     else:
                         break
