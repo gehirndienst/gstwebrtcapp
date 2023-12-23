@@ -2,7 +2,7 @@ import asyncio
 
 from ahoyapp.app import GstWebRTCBinAppConfig
 from ahoyapp.connector import AhoyConnector
-from utils.utils import LOGGER
+from utils.base import LOGGER
 
 try:
     import uvloop

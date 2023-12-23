@@ -24,7 +24,7 @@ gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
 from gi.repository import GstWebRTC
 
-from utils.utils import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
+from utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
 
 DEFAULT_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302

@@ -11,7 +11,6 @@ License:
 
 """
 
-from typing import List
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
 import asyncio
 from collections import deque
@@ -29,7 +28,8 @@ from gi.repository import GstWebRTC
 from gi.repository import Gst
 
 from ahoyapp.app import GstWebRTCBinApp, GstWebRTCBinAppConfig
-from utils.utils import LOGGER, stats_to_dict, wait_for_condition, async_wait_for_condition
+from utils.base import LOGGER, wait_for_condition, async_wait_for_condition
+from utils.gst import stats_to_dict
 
 
 class AhoyConnector:
@@ -369,6 +369,7 @@ class AhoyConnector:
                 return
         except Exception as e:
             # this is on some external exception where terminate_webrtc_coro was not trigerred e.g., pipeline error msg.
+            # TODO: maybe also try to rerun it in case of pipeline error? since this may be related to the network link failure
             self.terminate_webrtc_coro()
             for task in tasks:
                 task.cancel()

@@ -1,51 +1,5 @@
-import asyncio
-import logging
 import re
-import time
-from typing import Any, Callable, Dict
-
-# logger
-LOGGER = logging
-LOGGER.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
-
-
-# exceptions
-class GSTWEBRTCAPP_EXCEPTION(Exception):
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-    def __str__(self):
-        return f"{self.args[0]}"
-
-
-class APPBIN_EXCEPTION(GSTWEBRTCAPP_EXCEPTION):
-    pass
-
-
-class CONNECTOR_EXCEPTION(GSTWEBRTCAPP_EXCEPTION):
-    pass
-
-
-class CANCEL_CORO_EXCEPTION(GSTWEBRTCAPP_EXCEPTION):
-    pass
-
-
-# utils
-def wait_for_condition(condition_func: Callable[[], bool], timeout_sec: int) -> bool:
-    start_time = time.time()
-    while not condition_func():
-        if time.time() - start_time >= float(timeout_sec):
-            raise APPBIN_EXCEPTION(f"Timeout {timeout_sec} sec is reached for condition {condition_func.__name__}")
-    return True
-
-
-async def async_wait_for_condition(condition_func: Callable[[], bool], timeout_sec: int) -> bool:
-    start_time = time.time()
-    while not condition_func():
-        if time.time() - start_time >= float(timeout_sec):
-            raise APPBIN_EXCEPTION(f"Timeout {timeout_sec} sec is reached for condition {condition_func.__name__}")
-        await asyncio.sleep(0.5)
-    return True
+from typing import Any, Dict
 
 
 def stats_to_dict(input_stats_string: str) -> Dict[str, Any]:
