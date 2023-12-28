@@ -17,6 +17,7 @@ from collections import deque
 from datetime import datetime
 import json
 import requests
+import threading
 
 import gi
 
@@ -28,6 +29,7 @@ from gi.repository import GstWebRTC
 from gi.repository import Gst
 
 from ahoyapp.app import GstWebRTCBinApp, GstWebRTCBinAppConfig
+from control.agent import Agent
 from utils.base import LOGGER, wait_for_condition, async_wait_for_condition
 from utils.gst import stats_to_dict
 
@@ -39,10 +41,11 @@ class AhoyConnector:
     :param str server: AhoyMedia server URL.
     :param str api_key: AhoyMedia API key.
     :param GstWebRTCBinAppConfig pipeline_config: Configuration for the GStreamer WebRTC pipeline.
+    :param Agent agent: AI-enhanced agent that optionally controls the quality of the video via GStreamer. Nullable.
     :param str feed_name: Feed name for the connection.
     :param str signalling_channel_name: Name of the signalling channel.
     :param str stats_channel_name: Name of the stats channel.
-    :param float stats_interval: Interval for collecting and sending WebRTCBin stats.
+    :param float stats_update_interval: Interval for requesting/receiving new webrtc stats.
     """
 
     def __init__(
@@ -50,10 +53,11 @@ class AhoyConnector:
         server: str,
         api_key: str,
         pipeline_config: GstWebRTCBinAppConfig = GstWebRTCBinAppConfig(),
+        agent: Agent | None = None,
         feed_name: str = "gstreamerwebrtcapp",
         signalling_channel_name: str = "control",
         stats_channel_name: str = "telemetry",
-        stats_interval: float = 1.0,
+        stats_update_interval: float = 1.0,
     ):
         self.server = server
         self.api_key = api_key
@@ -71,9 +75,11 @@ class AhoyConnector:
         self.webrtcbin_ice_connection_state = GstWebRTC.WebRTCICEConnectionState.NEW
         self.pc_out_ice_connection_state = "new"
 
+        self.agent = agent
+        self.agent_thread = None
         self.ahoy_stats = deque(maxlen=10000)
         self.webrtcbin_stats = deque(maxlen=10000)
-        self.stats_interval = stats_interval
+        self.stats_update_interval = stats_update_interval
 
         self.is_running = False
         self.webrtc_coro_control_task = None
@@ -295,7 +301,13 @@ class AhoyConnector:
                     stats[stat_name] = stats_to_dict(stat_value.to_string())
         else:
             LOGGER.error(f"ERROR: no stats to save...")
-        self.webrtcbin_stats.append((datetime.now().strftime('%H:%M:%S.%f')[:-3], stats))
+        # write only stats that are received after RTP is set up
+        if self.agent is not None:
+            # if agent is attached, push stats to its controller
+            self.agent.controller.push_observation(stats)
+        else:
+            # if no agent just push stats to the internal queue
+            self.webrtcbin_stats.append(stats)
 
     async def handle_ice_connection(self) -> None:
         LOGGER.info(f"OK: ICE CONNECTION HANDLER IS ON -- ready to check for ICE connection state")
@@ -319,7 +331,7 @@ class AhoyConnector:
     async def handle_webrtcbin_stats(self) -> None:
         LOGGER.info(f"OK: WEBRTCBIN STATS HANDLER IS ON -- ready to check for stats")
         while self.is_running:
-            await asyncio.sleep(self.stats_interval)
+            await asyncio.sleep(self.stats_update_interval)
             promise = Gst.Promise.new_with_change_func(self._on_get_webrtcbin_stats, None, None)
             self._app.webrtcbin.emit('get-stats', None, promise)
         LOGGER.info(f"OK: GST STATS HANDLER IS OFF!")
@@ -336,6 +348,12 @@ class AhoyConnector:
             pipeline_task = asyncio.create_task(self._app.handle_pipeline())
             webrtcbin_stats_task = asyncio.create_task(self.handle_webrtcbin_stats())
             tasks = [signalling_task, pipeline_task, webrtcbin_stats_task]
+            if self.agent is not None:
+                # start agent's controller and agent's thread
+                controller_task = asyncio.create_task(self.agent.controller.handle_actions(self._app))
+                self.agent_thread = threading.Thread(target=self.agent.run, args=(True,), daemon=True)
+                self.agent_thread.start()
+                tasks.append(controller_task)
             #######################################################################################
             self.webrtc_coro_control_task = asyncio.create_task(asyncio.sleep(float('inf')))
             tasks = [self.webrtc_coro_control_task, *tasks]
@@ -350,6 +368,9 @@ class AhoyConnector:
                     pass
                 for task in tasks:
                     task.cancel()
+                if self.agent_thread is not None:
+                    self.agent.stop()
+                    self.agent_thread.join()
                 self._app = None
                 LOGGER.info("OK: main webrtc coroutine need to be stopped on streamStopRequest, pending...")
                 return await self.webrtc_coro()
@@ -362,6 +383,9 @@ class AhoyConnector:
                     pass
                 for task in tasks:
                     task.cancel()
+                if self.agent_thread is not None:
+                    self.agent.stop()
+                    self.agent_thread.join()
                 self._app = None
                 LOGGER.error(
                     "ERROR: main webrtc coroutine has been interrupted due to an internal exception, stopping..."
@@ -373,10 +397,13 @@ class AhoyConnector:
             self.terminate_webrtc_coro()
             for task in tasks:
                 task.cancel()
+            if self.agent_thread is not None:
+                self.agent.stop()
+                self.agent_thread.join()
             self._app = None
             LOGGER.error(
-                f"ERROR: main webrtc coroutine has been unexpectedly interrupted due to an exception: '{str(e)}',"
-                " stopping..."
+                "ERROR: main webrtc coroutine has been unexpectedly interrupted due to an exception:"
+                f" '{str(e)}', stopping..."
             )
             return
 

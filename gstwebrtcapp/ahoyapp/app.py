@@ -183,13 +183,13 @@ class GstWebRTCBinApp:
         self.framerate = framerate
         self.raw_caps = self.get_raw_caps()
         self.raw_capsfilter.set_property("caps", self.raw_caps)
-        LOGGER.info(f"set framerate to {self.framerate}")
+        LOGGER.info(f"ACTION: set framerate to {self.framerate}")
 
     def set_resolution(self, width: int, height: int) -> None:
         self.resolution = {"width": width, "height": height}
         self.raw_caps = self.get_raw_caps()
         self.raw_capsfilter.set_property("caps", self.raw_caps)
-        LOGGER.info(f"set resolution to {self.resolution['width']}x{self.resolution['height']}")
+        LOGGER.info(f"ACTION: set resolution to {self.resolution['width']}x{self.resolution['height']}")
 
     def set_bitrate(self, bitrate_kbps: int) -> None:
         if self.encoder_gst_name.startswith("nv") or self.encoder_gst_name.startswith("x26"):
@@ -200,7 +200,7 @@ class GstWebRTCBinApp:
             raise GSTWEBRTCAPP_EXCEPTION(f"encoder {self.encoder_gst_name} is not supported")
 
         self.bitrate = bitrate_kbps
-        LOGGER.info(f"set bitrate to {bitrate_kbps} kbps")
+        LOGGER.info(f"ACTION: set bitrate to {bitrate_kbps} kbps")
 
     def set_fec_percentage(self, percentage: int, index: int = -1) -> None:
         if len(self.transceivers) == 0:
@@ -216,7 +216,7 @@ class GstWebRTCBinApp:
                 transceiver.set_property("fec-percentage", percentage)
 
         self.fec_percentage = percentage
-        LOGGER.info(f"set fec percentage to {percentage}")
+        LOGGER.info(f"ACTION: set fec percentage to {percentage}")
 
     def create_data_channel(
         self,

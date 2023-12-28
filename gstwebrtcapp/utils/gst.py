@@ -1,5 +1,18 @@
+from enum import Enum
 import re
 from typing import Any, Dict
+
+
+class GstWebRTCStatsType(Enum):
+    CODEC = "codec"
+    ICE_CANDIDATE_LOCAL = "ice-candidate-local"
+    ICE_CANDIDATE_REMOTE = "ice-candidate-remote"
+    ICE_CANDIDATE_PAIR = "ice-candidate-pair"
+    TRANSPORT = "transport"
+    RTP_REMOTE_INBOUND_STREAM = "rtp-remote-inbound-stream"
+    RTP_REMOTE_OUTBOUND_STREAM = "rtp-remote-outbound-stream"
+    RTP_INBOUND_STREAM = "rtp-inbound-stream"
+    RTP_OUTBOUND_STREAM = "rtp-outbound-stream"
 
 
 def stats_to_dict(input_stats_string: str) -> Dict[str, Any]:
@@ -50,3 +63,10 @@ def _cast_stat_dict(data_dict: Dict[str, Any]) -> Dict[str, Any]:
                 print(f"Failed to cast {key}={value} to {data_type}")
                 cast_dict[key] = None
     return cast_dict
+
+
+def find_stat(stats: Dict[str, Any], stat: GstWebRTCStatsType) -> Dict[str, Any] | None:
+    for key in stats:
+        if key.startswith(stat.value):
+            return stats[key]
+    return None
