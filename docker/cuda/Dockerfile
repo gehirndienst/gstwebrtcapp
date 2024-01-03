@@ -1,15 +1,12 @@
 FROM ubuntu:23.04
 
-LABEL description \
-    "A docker for playing with GStreamer with all video codecs built. \
-    Release 1.0.1: upgraded to ubuntu23 to have gstreamer1.22 to work with webrtc* elements. Also added rust/npm dependencies for gst-rs project. \
-    Release 1.0.2: got rid of unncecessary rust dependencies, upgraded python verstion, smallfixes."
-
-LABEL maintainer "Nikita Smirnov <nsm@informatik.uni-kiel.de>"
-LABEL version "1.0.2"
-
 ENV PYTHON_VERSION=3.11.7
-ENV DEBIAN_FRONTEND=noninteractive
+
+LABEL description \
+    "A docker for playing with GStreamer with all video codecs built using CUDA. \
+    Release 1.0.0: added cuda 12.1 support."
+LABEL maintainer "Nikita Smirnov <nsm@informatik.uni-kiel.de>"
+LABEL version "1.0.1"
 
 WORKDIR /tmp
 
@@ -20,6 +17,22 @@ RUN apt-get update -y && apt-get upgrade -y && DEBIAN_FRONTEND=noninteractive ap
 
 # for building
 RUN ldconfig && pip install --break-system-packages --upgrade pip && pip install --break-system-packages meson ninja
+
+# INSTALL CUDA 12.1 (FOR EACH VERSION ONE NEEDS CUSTOM DRIVER CODES)
+RUN apt-get update -y && apt-get upgrade -y && DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-12 g++-12 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 10 && update-alternatives --config gcc
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-ubuntu2204.pin && \
+    mv cuda-ubuntu2204.pin /etc/apt/preferences.d/cuda-repository-pin-600 && \
+    wget https://developer.download.nvidia.com/compute/cuda/12.1.0/local_installers/cuda-repo-ubuntu2204-12-1-local_12.1.0-530.30.02-1_amd64.deb && \
+    dpkg -i cuda-repo-ubuntu2204-12-1-local_12.1.0-530.30.02-1_amd64.deb && \
+    cp /var/cuda-repo-ubuntu2204-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/ && \
+    apt-get update && \
+    apt-get -y install cuda
+ENV CUDA_VERSION=12.1.0
+ENV CUDA_HOME=/usr/local/cuda-12.1
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+RUN echo "export Thrust_DIR=/usr/local/cuda-12.1/lib64/cmake/thrust" >> ~/.bashrc
 
 # BUILD NETFLIX VMAF (FOR VOQ METRICS)
 RUN git clone https://github.com/Netflix/vmaf.git && \
@@ -63,7 +76,7 @@ RUN git -C SVT-AV1 pull 2> /dev/null || git clone https://gitlab.com/AOMediaCode
     cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_DEC=OFF -DBUILD_SHARED_LIBS=OFF .. && \
     make -j${nproc} && make install
 
-# ADD X11 SUPPORT
+# ADD X11 SUPPORT TO WORK WITH OBS STUDIO GUI
 RUN apt-get update -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server dbus-x11 xauth xorg xpra apt-transport-https software-properties-common ca-certificates \
     && mkdir /var/run/sshd \
@@ -108,7 +121,7 @@ RUN cp -r /usr/lib/python3/dist-packages/gi/ /root/.pyenv/versions/${PYTHON_VERS
 RUN pip install aiortc uvloop
 
 # INSTALL DRL STACK
-RUN pip install torch torchvision torchaudio
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 RUN pip install stable-baselines3 sb3-contrib gymnasium tensorboard seaborn jupyter optuna swig
 
 # CLEANUP

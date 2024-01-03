@@ -19,10 +19,18 @@ The preferred way to install it for a quick test is to use Docker. Go to the doc
 ```bash
 docker build -f Dockerfile -t gstwebrtcapp:latest .
 ```
+To build docker with CUDA 12.1 (so far fixed) support, use:
+```bash
+docker build -f cuda/Dockerfile -t gstwebrtcapp:latest .
+```
 Then run the container with:
 ```bash
 docker run -it --name gstwebrtcapp_c0 --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
 ```
+to run the CUDA container, use:
+```bash 
+docker run --gpus all -it --name gstwebrtcapp_c0 --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
+```	
 where {..} are the display options. On Linux:
 ```bash
 -e DISPLAY=$YOUR_IPV4_ADDRESS:0 -v /tmp/.X11-unix:/tmp/.X11-unix
@@ -30,12 +38,6 @@ where {..} are the display options. On Linux:
 on Windows:
 ```bash
 -e DISPLAY=host.docker.internal:0.0
-```
-
-#### Bug with gstreamer python bindings
-It could be that gi bindings are installed by a system in the wrong place so that they are invisible for pyenv. You may check it in VSCode. Then find and copy them like this (for 3.11.5 version in Dockerfile):
-```bash
-cp -r /usr/lib/python3/dist-packages/gi/ /root/.pyenv/versions/3.11.5/lib/python3.11/site-packages/
 ```
 
 ### Manual
@@ -46,7 +48,6 @@ To install manually, you need to do all the instructions written in a Dockerfile
 ```bash
 apt-get install python3-gst-1.0 python-gi-dev python3-gi gstreamer1.0-python3-plugin-loader
 ```
-4. Install aiortc python library.
 
 ## Usage
 ### Run
@@ -63,6 +64,7 @@ This project is licensed under the GPLv3 License - see the [LICENSE](LICENSE) fi
 
 ## Author
 M.Sc. Nikita Smirnov, Intelligent Systems AG, Department of Computer Science, Kiel University, Germany.
+
 Please contact me in case of any questions or bug reports: [Nikita Smirnov](mailto:nsm@informatik.uni-kiel.de)
 
 
