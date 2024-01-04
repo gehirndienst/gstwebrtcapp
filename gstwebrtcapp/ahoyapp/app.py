@@ -15,6 +15,7 @@ import asyncio
 from dataclasses import dataclass, field
 import json
 import logging
+import re
 from typing import Any, Callable, Dict, List
 
 import gi
@@ -26,11 +27,22 @@ from gi.repository import GstWebRTC
 
 from utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
 
+GST_ENCODERS = ["x264enc", "nvh264enc", "x265enc", "vp8enc", "vp9enc"]
+
 DEFAULT_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=1 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate !
     capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! queue !
     x264enc name=encoder tune=zerolatency speed-preset=ultrafast ! 
+    rtph264pay name=payloader aggregate-mode=zero-latency ! queue !
+    capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
+'''
+
+DEFAULT_CUDA_PIPELINE = '''
+    webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=1 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
+    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! queue ! 
+    nvh264enc name=encoder preset=low-latency-hq ! 
     rtph264pay name=payloader aggregate-mode=zero-latency ! queue !
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
 '''
@@ -80,16 +92,18 @@ class GstWebRTCBinApp:
         self.source = None
         self.raw_caps = None
         self.raw_capsfilter = None
-        self.encoder_gst_name = (
-            config.encoder_gst_name
-            if config.encoder_gst_name in ["x264enc", "nvh264enc", "x265enc", "vp8enc", "vp9enc"]
-            else "x264enc"
-        )
+        self.encoder_gst_name = config.encoder_gst_name if config.encoder_gst_name in GST_ENCODERS else "x264enc"
         self.encoder = None
         self.pay_capsfilter = None
         self.transceivers = []
-        self.is_cuda = self.encoder_gst_name == "nvh264enc"
         self.bus = None
+
+        self.is_cuda = self.encoder_gst_name == "nvh264enc"
+        if self.is_cuda:
+            # FIXME: replace it later with a custom configurator
+            pattern = re.compile(r'(!\s*.*?name=encoder.*?!)')
+            replacement_line = '! nvh264enc name=encoder preset=low-latency-hq !'
+            self.pipeline_str = pattern.sub(replacement_line, self.pipeline_str)
 
         self.data_channels = {}
 

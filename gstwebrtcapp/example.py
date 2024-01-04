@@ -1,6 +1,6 @@
 import asyncio
 
-from ahoyapp.app import GstWebRTCBinAppConfig
+from ahoyapp.app import DEFAULT_CUDA_PIPELINE, GstWebRTCBinAppConfig
 from ahoyapp.connector import AhoyConnector
 from utils.base import LOGGER
 
@@ -57,8 +57,31 @@ async def test_manipulate_video():
         return
 
 
+async def test_nvenc():
+    # run it to test nvenc hardware acceleration.
+    try:
+        cfg = GstWebRTCBinAppConfig(
+            video_url="VIDEO_SOURCE",
+            pipeline_str=DEFAULT_CUDA_PIPELINE,
+            encoder_gst_name="nvh264enc",
+        )
+
+        conn = AhoyConnector(
+            server=AHOY_DIRECTOR_URL,
+            api_key=API_KEY,
+            pipeline_config=cfg,
+        )
+
+        await conn.connect_coro()
+
+        await conn.webrtc_coro()
+
+    except KeyboardInterrupt:
+        LOGGER.info("KeyboardInterrupt received, exiting...")
+        return
+
+
 async def main():
-    # run it as the default endpoint
     try:
         cfg = GstWebRTCBinAppConfig(video_url=VIDEO_SOURCE)
 
