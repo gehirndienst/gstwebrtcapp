@@ -76,7 +76,7 @@ RUN git -C SVT-AV1 pull 2> /dev/null || git clone https://gitlab.com/AOMediaCode
     cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_DEC=OFF -DBUILD_SHARED_LIBS=OFF .. && \
     make -j${nproc} && make install
 
-# ADD X11 SUPPORT TO WORK WITH OBS STUDIO GUI
+# ADD X11 SUPPORT
 RUN apt-get update -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server dbus-x11 xauth xorg xpra apt-transport-https software-properties-common ca-certificates \
     && mkdir /var/run/sshd \
@@ -91,10 +91,10 @@ RUN apt-get update -y \
 ENV DISPLAY :0
 
 # INSTALL GSTREAMER
+RUN apt-get update && apt-get install -y --fix-missing libcairo2-dev libpango1.0-dev webpack nvidia-vaapi-driver libva-dev vainfo libnice-dev libudev-dev
 RUN apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly gstreamer1.0-nice gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio \
-    ubuntu-restricted-extras
+    gstreamer1.0-plugins-ugly gstreamer1.0-nice gstreamer1.0-libav gstreamer1.0-vaapi gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio  ubuntu-restricted-extras
 
 # PYTHON
 # INSTALL PYENV 
