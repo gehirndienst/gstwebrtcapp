@@ -40,6 +40,9 @@ on Windows:
 -e DISPLAY=host.docker.internal:0.0
 ```
 
+#### VPN
+To run the dockerized gstewebrtcapp application with VPN, one needs to build and to run the openconnect container and follow all the instructions that are written in [its repo](https://github.com/ducmthai/openconnect-as-a-container/tree/master). The preferrable way is to use the docker-compose. Then replace the ```--network=host``` option with ```--network=container:openconnect``` in the docker run command for gstwebrtcapp.
+
 ### Manual
 To install manually, you need to do all the instructions written in a Dockerfile, namely:
 1. Install sources for video codecs.
