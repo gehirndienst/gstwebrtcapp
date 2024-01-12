@@ -3,10 +3,11 @@ FROM ubuntu:23.04
 LABEL description \
     "A docker for playing with GStreamer with all video codecs built. \
     Release 1.0.1: upgraded to ubuntu23 to have gstreamer1.22 to work with webrtc* elements. Also added rust/npm dependencies for gst-rs project. \
-    Release 1.0.2: got rid of unncecessary rust dependencies, upgraded python verstion, smallfixes."
+    Release 1.0.2: got rid of unncecessary rust dependencies, upgraded python verstion, smallfixes. \
+    Release 1.0.3: added networking stuff."
 
 LABEL maintainer "Nikita Smirnov <nsm@informatik.uni-kiel.de>"
-LABEL version "1.0.2"
+LABEL version "1.0.3"
 
 ENV PYTHON_VERSION=3.11.7
 ENV DEBIAN_FRONTEND=noninteractive
@@ -78,10 +79,10 @@ RUN apt-get update -y \
 ENV DISPLAY :0
 
 # INSTALL GSTREAMER
-RUN apt-get update && apt-get install -y --fix-missing libcairo2-dev libpango1.0-dev webpack nvidia-vaapi-driver libva-dev vainfo libnice-dev libudev-dev
 RUN apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly gstreamer1.0-nice gstreamer1.0-libav gstreamer1.0-vaapi gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio  ubuntu-restricted-extras
+    gstreamer1.0-plugins-ugly gstreamer1.0-nice gstreamer1.0-libav gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio \
+    ubuntu-restricted-extras
 
 # PYTHON
 # INSTALL PYENV 
@@ -111,9 +112,13 @@ RUN pip install aiortc uvloop
 RUN pip install torch torchvision torchaudio
 RUN pip install stable-baselines3 sb3-contrib gymnasium tensorboard seaborn jupyter optuna swig
 
-# CLEANUP
-RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# INSTALL NETWORKING STUFF
+RUN apt-get update -y && apt-get install -y --fix-missing net-tools iputils-ping iproute2 openconnect && \
+    pip install tcconfig
 
 # CLONE GSTWEBRTCAPP
 WORKDIR /home
 RUN git clone https://github.com/gehirndienst/gstwebrtcapp.git
+
+# CLEANUP
+RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

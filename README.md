@@ -21,15 +21,15 @@ docker build -f Dockerfile -t gstwebrtcapp:latest .
 ```
 To build docker with CUDA 12.1 (so far fixed) support, use:
 ```bash
-docker build -f cuda/Dockerfile -t gstwebrtcapp:latest .
+docker build -f Dockerfile-cuda -t gstwebrtcapp:latest .
 ```
 Then run the container with:
 ```bash
-docker run -it --name gstwebrtcapp_c0 --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
+docker run -it --name gstwebrtcapp-container --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
 ```
 to run the CUDA container, use:
 ```bash 
-docker run --gpus all -it --name gstwebrtcapp_c0 --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
+docker run --gpus all -it --name gstwebrtcapp-container --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
 ```	
 where {..} are the display options. On Linux:
 ```bash
@@ -41,7 +41,14 @@ on Windows:
 ```
 
 #### VPN
-To run the dockerized gstewebrtcapp application with VPN, one needs to build and to run the openconnect container and follow all the instructions that are written in [its repo](https://github.com/ducmthai/openconnect-as-a-container/tree/master). The preferrable way is to use the docker-compose. Then replace the ```--network=host``` option with ```--network=container:openconnect``` in the docker run command for gstwebrtcapp.
+To run the gstewebrtcapp application with VPN inside the container, one needs to run preinstalled openconnect VPN client in the container. To do so, one needs to run the following command in the container's terminal:
+```bash
+openconnect -u=$VPN_USER --passwd-on-stdin $VPN_HOST
+```
+where $VPN_USER is the VPN username, $VPN_HOST is the VPN host. The password will be asked and read from stdin. Due to the autentication requirements, it needs to be done in the active mode. So either run it in the attached VSCode terminal or attach an interactive shell to the running container with:
+```bash
+docker exec -it gstwebrtcapp-container bash
+```
 
 ### Manual
 To install manually, you need to do all the instructions written in a Dockerfile, namely:
