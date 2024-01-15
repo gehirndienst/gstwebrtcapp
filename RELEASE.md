@@ -9,3 +9,11 @@
 * Control resolution, framerate and bitrate of the video on the fly via setters provided by the application.
 * Control video encoder and RTP payloader parameters of the pipeline.
 * Receive WebRTCBin statistics from the viewer's browser.
+
+## Version 1.0.1 (2024-01-15)
+
+### Features
+* New Control API introduced in the `control` submodule. It allows to define the AI-enablers / CC algorithms to control the video stream on the fly via the API and GStreamer app setters.
+* First Deep Reinforcement Learning AI-enabler (`control/drl`) that uses the WebRTC stats from the viewer's browser to control the video stream. It is based on the stable-baselines3 library and uses the SAC algorithm. Currently the reward design and hyperparameters are not publicly available.
+* Fully isolated Docker environment with CUDA, with a built-in VPN support via openconnect and with tcconfig to tweak the network. Check `docker` folder for the corresponding Dockerfiles.
+* Support GStreamer NVENC encoders for CUDA containers (h264, h265, vp8, vp9, av1). Currently no support for VAAPI or Jetson Gstreamer plugins.

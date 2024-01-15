@@ -61,13 +61,16 @@ apt-get install python3-gst-1.0 python-gi-dev python3-gi gstreamer1.0-python3-pl
 
 ## Usage
 ### Run
-To run the application, you need to specify the configuration of the GStreamer application and connection parameters. The default tuned pipeline together with the main parameters is provided in app.py. For the connection parameters, one needs to specify the server address and the API key among other optional parameters.
+To run the application, you need to specify the configuration of the GStreamer application and connection parameters. The default tuned pipeline together with the main parameters is provided in `app.py`. For the connection parameters, one needs to specify the server address and the API key among other optional parameters.
 
-Next, in the main endpoint, one needs to await the two coroutines as provided in `example.py` file. The first `connect_coro` controls the connection and communication with AhoyMedia and the second `webrtc_coro` controls all GStreamer -> WebRTC steps via its sub-coroutines aka handlers. The main.py file contains an example of how to run the application. Note that it won't work unless the valid AhoyDirector URL, API key and video source are specified instead of the dummy strings. 
+Next, in the main endpoint, one needs to await the two coroutines as provided in `example.py` file. The first `connect_coro` controls the connection and communication with AhoyMedia and the second `webrtc_coro` controls all GStreamer -> WebRTC steps via its sub-coroutines aka handlers. The `example.py` file contains an example of how to run the application. Note that it won't work unless the valid AhoyDirector URL, API key and video source are specified instead of the dummy strings. 
 
 If one stops streaming in AhoyDirector window, then `webrtc_coro` will turn into a pending state and will wait for the next play event to resume streaming. The pipeline will be stopped and set in a NULL state together with WebRTC stack and restarted on the next play event so that when the video is not played, the resources for GStreamer C objects are properly deallocated. In the meantime, the `connect_coro` coroutine will be still running to keep the connection with AhoyMedia.
 
 To add a new internal handler (e.g., for some specific statistics), one needs to add a new sub-coroutine to the main block of the `webrtc_coro` coroutine. To add a new external handler (e.g., to control the video quality), one needs to add a new coroutine to the main execution as demonstrated in the `example.py` file by a dummy `test_manipulate_video` endpoint.
+
+### Control API
+The application provides the Control API to define the agents control the video quality on the fly. It is implemented in the `control` submodule. The agents are either AI-enablers or congestion control algorithms. The `control/drl` submodule contains the first Deep Reinforcement Learning agent that uses the WebRTC stats from the viewer's browser to control the video stream. It is based on the stable-baselines3 library and uses the SAC algorithm and serves as an example of how to implement and use the Control API. Currently the reward design and hyperparameters for it are not publicly available. 
 
 ## License
 This project is licensed under the GPLv3 License - see the [LICENSE](LICENSE) file for details.
