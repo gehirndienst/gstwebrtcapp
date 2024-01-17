@@ -70,3 +70,6 @@ def find_stat(stats: Dict[str, Any], stat: GstWebRTCStatsType) -> Dict[str, Any]
         if key.startswith(stat.value):
             return stats[key]
     return None
+
+def get_stat_diff(stats: Dict[str, Any], last_stats: Dict[str, Any], stat: str) -> float | int:
+    return stats[stat] - last_stats[stat] if last_stats is not None else stats[stat]

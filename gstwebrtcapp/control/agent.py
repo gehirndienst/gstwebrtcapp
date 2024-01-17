@@ -22,6 +22,7 @@ class AgentType(Enum):
     ABSTRACT = "ABSTRACT"
     CC = "CC"
     DRL = "DRL"
+    RECORDER = "RECORDER"
 
 
 class Agent(metaclass=ABCMeta):
