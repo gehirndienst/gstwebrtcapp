@@ -203,7 +203,6 @@ class AhoyConnector:
 
         # NOTE: the app (GstPipeline) starts first when the video content is requested. Before that this object is None
         try:
-            LOGGER.info(f"INFO: _on_received_sdp_request callback, piepleine config is {self.pipeline_config}")
             self._app = GstWebRTCBinApp(self.pipeline_config)
         except Exception as e:
             LOGGER.error(
@@ -273,7 +272,7 @@ class AhoyConnector:
                     LOGGER.info(f"INFO: _on_answer_created callback, found recvonly attribute")
                     media.remove_attribute(j)
                     attr = GstSdp.SDPAttribute()
-                    attr.set("sendrecv", attr.value)
+                    attr.set('sendrecv', attr.value)
                     media.insert_attribute(j, attr)
                     LOGGER.info(f"INFO: _on_answer_created callback, changed recvonly to sendrecv")
         promise = Gst.Promise.new()

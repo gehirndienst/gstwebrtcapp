@@ -34,7 +34,7 @@ DEFAULT_PIPELINE = '''
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate !
     capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! queue !
     x264enc name=encoder tune=zerolatency speed-preset=superfast ! 
-    rtph264pay name=payloader aggregate-mode=zero-latency config-interval=1 ! queue !
+    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 ! queue !
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
 '''
 
@@ -43,7 +43,7 @@ DEFAULT_CUDA_PIPELINE = '''
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
     capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! queue ! 
     nvh264enc name=encoder preset=low-latency-hq ! 
-    rtph264pay name=payloader aggregate-mode=zero-latency config-interval=1 ! queue !
+    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 ! queue !
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
 '''
 
@@ -141,8 +141,15 @@ class GstWebRTCBinApp:
             LOGGER.info(f"OK: video location is set to {self.video_url}")
         self.raw_capsfilter = self.pipeline.get_by_name("raw_capsfilter")
         self.encoder = self.pipeline.get_by_name("encoder")
+        self.payloader = self.pipeline.get_by_name("payloader")
         self.pay_capsfilter = self.pipeline.get_by_name("payloader_capsfilter")
-        if not self.source or not self.raw_capsfilter or not self.encoder or not self.pay_capsfilter:
+        if (
+            not self.source
+            or not self.raw_capsfilter
+            or not self.encoder
+            or not self.payloader
+            or not self.pay_capsfilter
+        ):
             raise GSTWEBRTCAPP_EXCEPTION("can't find needed elements in the pipeline")
 
         self.get_transceivers()
