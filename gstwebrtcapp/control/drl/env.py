@@ -48,7 +48,7 @@ class DrlEnv(Env):
         state_dict = self.mdp.make_state(stats)
         self.state = self._dict_to_gym_space_sample(state_dict)
 
-        self.reward, self.reward_parts = self.mdp.calculate_reward(state_dict)
+        self.reward, self.reward_parts = self.mdp.calculate_reward()
 
         terminated = self.mdp.is_terminated(self.steps)
         truncated = self.mdp.is_truncated(self.steps)
@@ -71,7 +71,7 @@ class DrlEnv(Env):
         self.state = self._get_initial_state()
 
         # to save the reward fields in a dict
-        _, self.reward_parts = self.mdp.calculate_reward(self.state)
+        self.reward_parts = self.mdp.get_default_reward_parts_dict()
 
         LOGGER.info(f"INFO: resetting the DRL env: episodes {self.episodes}, is finished {self.is_finished}")
         return self.state, {}
