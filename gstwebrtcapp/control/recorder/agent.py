@@ -1,6 +1,6 @@
 from collections import deque
 import csv
-import datetime
+from datetime import datetime
 import os
 import time
 from typing import Any, Dict
@@ -107,7 +107,7 @@ class CsvBrowserRecorderAgent(Agent):
 
         # opened to extensions
         final_stats = {
-            "timestamp": time.strftime("%Y-%m-%d-%H:%M:%S:%f"),
+            "timestamp": datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f"),
             "fraction_packets_lost": rtp_remote_inbound["rb-fractionlost"],
             "packets_lost": rtp_remote_inbound["rb-packetslost"],
             "loss_rate_%": loss_rate,
@@ -122,7 +122,6 @@ class CsvBrowserRecorderAgent(Agent):
             "tx_rate_mbits": rtp_outbound["bitrate"] / 1000000,
             "rx_rate_mbits": rx_rate,
         }
-        print(final_stats)
 
         self.stats.append(final_stats)
         self.last_stats = gst_stats
