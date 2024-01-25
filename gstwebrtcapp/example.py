@@ -2,6 +2,11 @@ import asyncio
 
 from ahoyapp.app import DEFAULT_CUDA_PIPELINE, GstWebRTCBinAppConfig
 from ahoyapp.connector import AhoyConnector
+from control.controller import Controller
+from control.drl.agent import DRLAgent
+from control.drl.config import DrlConfig
+from control.drl.mdp import AhoyBrowserMDP
+from control.recorder.agent import CsvBrowserRecorderAgent
 from utils.base import LOGGER
 
 try:
@@ -74,6 +79,89 @@ async def test_nvenc():
 
         await conn.connect_coro()
 
+        await conn.webrtc_coro()
+
+    except KeyboardInterrupt:
+        LOGGER.info("KeyboardInterrupt received, exiting...")
+        return
+
+
+async def test_csv_recorder():
+    # run it to test csv recorder agent
+    try:
+        cfg = GstWebRTCBinAppConfig(video_url=VIDEO_SOURCE)
+
+        stats_update_interval = 1.0
+
+        agent = CsvBrowserRecorderAgent(
+            controller=Controller(),
+            stats_update_interval=stats_update_interval,
+            warmup=10.0,
+            log_path="./logs",
+            verbose=2,
+        )
+
+        conn = AhoyConnector(
+            pipeline_config=cfg,
+            agent=agent,
+            server=AHOY_DIRECTOR_URL,
+            api_key=API_KEY,
+            feed_name="recorder_test",
+            stats_update_interval=stats_update_interval,
+        )
+
+        await conn.connect_coro()
+        await conn.webrtc_coro()
+
+    except KeyboardInterrupt:
+        LOGGER.info("KeyboardInterrupt received, exiting...")
+        return
+
+
+async def test_drl():
+    # run it to test drl agent
+    try:
+        episodes = 10
+        episode_length = 50
+        stats_update_interval = 3.0
+
+        app_cfg = GstWebRTCBinAppConfig(video_url=VIDEO_SOURCE)
+
+        agent = DRLAgent(
+            config=DrlConfig(
+                mode="train",
+                model_name="sac",
+                episodes=episodes,
+                episode_length=episode_length,
+                state_update_interval=stats_update_interval,
+                hyperparams_cfg={
+                    "policy": "MultiInputPolicy",
+                    "batch_size": 128,
+                    "ent_coef": "auto",
+                    "policy_kwargs": {"log_std_init": -1, "activation_fn": "relu", "net_arch": [256, 256]},
+                },
+                callbacks=['print_step'],
+                save_model_path="./models",
+                save_log_path="./logs",
+                verbose=2,
+            ),
+            controller=Controller(),
+            mdp=AhoyBrowserMDP(
+                reward_function_name="qoe_ahoy",
+                episode_length=episode_length,
+            ),
+        )
+
+        conn = AhoyConnector(
+            pipeline_config=app_cfg,
+            agent=agent,
+            server=AHOY_DIRECTOR_URL,
+            api_key=API_KEY,
+            feed_name="drl_test",
+            stats_update_interval=stats_update_interval,
+        )
+
+        await conn.connect_coro()
         await conn.webrtc_coro()
 
     except KeyboardInterrupt:
