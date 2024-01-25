@@ -3,7 +3,7 @@ FROM ubuntu:23.04
 LABEL description \
     "A docker for playing with GStreamer with all video codecs built. \
     Release 1.0.1: upgraded to ubuntu23 to have gstreamer1.22 to work with webrtc* elements. Also added rust/npm dependencies for gst-rs project. \
-    Release 1.0.2: got rid of unncecessary rust dependencies, upgraded python verstion, smallfixes. \
+    Release 1.0.2: upgraded python version, smallfixes. \
     Release 1.0.3: added networking stuff."
 
 LABEL maintainer "Nikita Smirnov <nsm@informatik.uni-kiel.de>"
@@ -115,6 +115,17 @@ RUN pip install stable-baselines3 sb3-contrib gymnasium tensorboard seaborn jupy
 # INSTALL NETWORKING STUFF
 RUN apt-get update -y && apt-get install -y --fix-missing net-tools iputils-ping iproute2 openconnect && \
     pip install tcconfig
+
+# INSTALL RUST
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# INSTALL GST RUST PLUGINS
+RUN curl -sL https://deb.nodesource.com/setup_16.x | bash -s -- -y
+RUN apt-get update && apt-get install -y --fix-missing npm rust-src libnice-dev libpango1.0-dev libcairo2-dev webpack
+WORKDIR /opt
+RUN git clone https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs.git && cd gst-plugins-rs && cargo build
+ENV GST_PLUGIN_PATH="/opt/gst-plugins-rs/target/debug:${GST_PLUGIN_PATH}"
 
 # CLONE GSTWEBRTCAPP
 WORKDIR /home
