@@ -293,21 +293,32 @@ class GstWebRTCBinApp:
             while True:
                 message = self.bus.timed_pop_filtered(
                     0.5 * Gst.SECOND,
-                    Gst.MessageType.ERROR
+                    Gst.MessageType.APPLICATION
                     | Gst.MessageType.EOS
-                    | Gst.MessageType.STATE_CHANGED
-                    | Gst.MessageType.LATENCY,
+                    | Gst.MessageType.ERROR
+                    | Gst.MessageType.LATENCY
+                    | Gst.MessageType.STATE_CHANGED,
                 )
                 if message:
                     message_type = message.type
-                    if message_type == Gst.MessageType.ERROR:
+                    if message_type == Gst.MessageType.APPLICATION:
+                        if message.get_structure().get_name() == "termination":
+                            LOGGER.info("INFO: received termination message, preparing to terminate the pipeline...")
+                            break
+                    elif message_type == Gst.MessageType.EOS:
+                        LOGGER.info("INFO: received EOS message, preparing to terminate the pipeline...")
+                        break
+                    elif message_type == Gst.MessageType.ERROR:
                         err, _ = message.parse_error()
                         LOGGER.error(f"ERROR: Pipeline error")
                         self.is_running = False
                         raise GSTWEBRTCAPP_EXCEPTION(err.message)
-                    elif message_type == Gst.MessageType.EOS:
-                        LOGGER.info("INFO: reached EOS")
-                        break
+                    elif message_type == Gst.MessageType.LATENCY:
+                        try:
+                            self.pipeline.recalculate_latency()
+                            LOGGER.debug("INFO: latency is recalculated")
+                        except Exception as e:
+                            raise GSTWEBRTCAPP_EXCEPTION(f"can't recalculate latency, reason: {e}")
                     elif message_type == Gst.MessageType.STATE_CHANGED:
                         if message.src == self.pipeline:
                             old, new, _ = message.parse_state_changed()
@@ -316,12 +327,6 @@ class GstWebRTCBinApp:
                                 f"{Gst.Element.state_get_name(old)} to "
                                 f"{Gst.Element.state_get_name(new)}"
                             )
-                    elif message_type == Gst.MessageType.LATENCY:
-                        try:
-                            self.pipeline.recalculate_latency()
-                            LOGGER.debug("INFO: latency is recalculated")
-                        except Exception as e:
-                            raise GSTWEBRTCAPP_EXCEPTION(f"can't recalculate latency, reason: {e}")
                 await asyncio.sleep(0.1)
         except KeyboardInterrupt:
             LOGGER.info("ERROR: handle_pipeline, KeyboardInterrupt received, exiting...")
@@ -352,6 +357,7 @@ class GstWebRTCBinApp:
         self.data_channels = {}
         LOGGER.info("OK: pipeline is terminated!")
 
-    def send_eos(self):
-        LOGGER.info("OK: sending EOS to the pipeline")
-        self.bus.post(Gst.Message.new_eos(None))
+    def send_termination_message_to_bus(self):
+        if self.bus is not None:
+            LOGGER.info("OK: sending termination message to the pipeline's bus")
+            self.bus.post(Gst.Message.new_application(None, Gst.Structure.new_empty("termination")))
