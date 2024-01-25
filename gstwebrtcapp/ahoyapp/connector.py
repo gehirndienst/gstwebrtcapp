@@ -71,6 +71,7 @@ class AhoyConnector:
         # internal webrtc
         self._app = None
         self.pipeline_config = pipeline_config
+        self.payload_type = None
         self.webrtcbin_sdp = None
         self.webrtcbin_ice_connection_state = GstWebRTC.WebRTCICEConnectionState.NEW
         self.pc_out_ice_connection_state = "new"
@@ -167,6 +168,9 @@ class AhoyConnector:
                     f"INFO: on_message, succesfully created local answer for webrtcbin on incoming SDP request..."
                 )
 
+                # force goog-remb to be added to the answer
+                self.webrtcbin_sdp.add_attribute('rtcp-fb', f'{self.payload_type} goog-remb')
+
                 candidates = msg["sdpRequest"]["candidates"]
                 for candidate in candidates:
                     LOGGER.info(f"INFO: on_message, adding ice candidate ... {candidate['candidate']}")
@@ -176,7 +180,7 @@ class AhoyConnector:
                     "sdpResponse": {
                         "success": True,
                         "uuid": msg["sdpRequest"]["uuid"],
-                        "sdp": self.webrtcbin_sdp,
+                        "sdp": self.webrtcbin_sdp.as_text(),
                     }
                 }
                 data = {"message": {"to": f"director.api_{self.api_key}", "payload": sdpResponse}}
@@ -214,45 +218,10 @@ class AhoyConnector:
         self._app.webrtcbin.connect('on-negotiation-needed', lambda _: None)
         self._app.webrtcbin.connect('notify::ice-connection-state', self._on_ice_connection_state_notify)
 
-        # add new transceiver
-        self._add_transceiver(sdpmsg)
-
         # set remote offer and create answer
         remote_offer = GstWebRTC.WebRTCSessionDescription.new(GstWebRTC.WebRTCSDPType.OFFER, sdpmsg)
         promise = Gst.Promise.new_with_change_func(self._on_offer_set, None, None)
         self._app.webrtcbin.emit('set-remote-description', remote_offer, promise)
-
-    def _add_transceiver(self, sdpmsg) -> None:
-        # assign new media, we assumed that we are interested only in the first one
-        media = sdpmsg.get_media(0)
-        if media is None:
-            LOGGER.error(f"ERROR: _add_transceiver callback, failed to get media at index 0 from remote offer's sdp")
-            self.terminate_webrtc_coro()
-
-        # get new caps
-        trans_caps = Gst.Caps.from_string("application/x-rtp")
-        res = media.attributes_to_caps(trans_caps)
-        if res != GstSdp.SDPResult.OK or trans_caps.is_empty():
-            LOGGER.error(f"ERROR: _add_transceiver callback, failed to convert media's attributes to the caps")
-            self.terminate_webrtc_coro()
-
-        # add new transceiver
-        dir = GstWebRTC.WebRTCRTPTransceiverDirection.SENDRECV
-        self._app.webrtcbin.emit('add-transceiver', dir, trans_caps)
-        # app has at least 1 default transceiver, when we add first new here, we have len(app.tr..) + 1
-        ahoy_transceiver = self._app.webrtcbin.emit('get-transceiver', len(self._app.transceivers))
-        if ahoy_transceiver is None:
-            LOGGER.error(f"ERROR: _add_transceiver callback, failed to retrieve a newly added transceiver")
-            self.terminate_webrtc_coro()
-        else:
-            ahoy_transceiver.set_property('do-nack', True)
-            ahoy_transceiver.set_property("fec-type", GstWebRTC.WebRTCFECType.ULP_RED)
-        self._app.transceivers.append(ahoy_transceiver)
-
-        LOGGER.info(
-            "INFO: _add_transceiver, added new transceiver, now there are"
-            f" {self._app.webrtcbin.emit('get-transceivers').len} transceivers in webrtcbin"
-        )
 
     def _on_offer_set(self, promise, _, __) -> None:
         assert promise.wait() == Gst.PromiseResult.REPLIED, "FAIL: offer set promise was not replied"
@@ -275,10 +244,13 @@ class AhoyConnector:
                     attr.set('sendrecv', attr.value)
                     media.insert_attribute(j, attr)
                     LOGGER.info(f"INFO: _on_answer_created callback, changed recvonly to sendrecv")
+                if attr.key == 'fmtp':
+                    self.payload_type = int(attr.value.split(' ')[0])
+                    LOGGER.info(f"INFO: _on_answer_created callback, found payload type {self.payload_type}")
         promise = Gst.Promise.new()
         self._app.webrtcbin.emit('set-local-description', answer, promise)
         promise.interrupt()
-        self.webrtcbin_sdp = answer.sdp.as_text()
+        self.webrtcbin_sdp = answer.sdp
         LOGGER.info(f"INFO: _on_answer_created callback, successfully created a local answer for webrtcbin")
 
     def _on_ice_connection_state_notify(self, pspec, _) -> None:

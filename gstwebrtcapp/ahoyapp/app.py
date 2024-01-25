@@ -35,7 +35,7 @@ DEFAULT_PIPELINE = '''
     capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! queue !
     x264enc name=encoder tune=zerolatency speed-preset=superfast ! 
     rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 ! queue !
-    capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
+    capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126, rtcp-fb-goog-remb=(boolean)true, rtcp-fb-transport-cc=(boolean)true" ! webrtc.
 '''
 
 DEFAULT_CUDA_PIPELINE = '''
