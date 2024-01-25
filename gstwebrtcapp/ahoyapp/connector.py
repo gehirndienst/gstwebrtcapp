@@ -83,6 +83,8 @@ class AhoyConnector:
         self.stats_update_interval = stats_update_interval
 
         self.is_running = False
+        self.is_locked = True
+
         self.webrtc_coro_control_task = None
 
     async def connect_coro(self) -> None:
@@ -141,54 +143,63 @@ class AhoyConnector:
             msg = json.loads(msg)
             if "streamStartRequest" in msg:
                 # streamStartRequest is received when the stream is played on the Ahoy side
-                LOGGER.info(f"INFO: SIGNALLING CHANNEL received streamStartRequest {msg}")
-                self.is_running = True
+                if msg["streamStartRequest"]["feedUuid"] == self.feed_name:
+                    LOGGER.info(f"INFO: SIGNALLING CHANNEL received streamStartRequest {msg}")
 
-                streamStartResponse = {
-                    "streamStartResponse": {
-                        "success": True,
-                        "uuid": msg["streamStartRequest"]["uuid"],
-                        "feedUuid": msg["streamStartRequest"]["feedUuid"],
+                    self.is_running = True
+                    self.is_locked = False
+
+                    streamStartResponse = {
+                        "streamStartResponse": {
+                            "success": True,
+                            "uuid": msg["streamStartRequest"]["uuid"],
+                            "feedUuid": msg["streamStartRequest"]["feedUuid"],
+                        }
                     }
-                }
-                data = {
-                    "message": {
-                        "to": f"director.api_{self.api_key}",
-                        "payload": streamStartResponse,
+                    data = {
+                        "message": {
+                            "to": f"director.api_{self.api_key}",
+                            "payload": streamStartResponse,
+                        }
                     }
-                }
-                self.signalling_channel.send(json.dumps(data))
+                    self.signalling_channel.send(json.dumps(data))
             elif "sdpRequest" in msg:
                 # sdpRequest is received next after streamStartRequest to set up the WebRTC connection
-                LOGGER.info(f"INFO: SIGNALLING CHANNEL received sdpRequest {msg}")
-                self._on_received_sdp_request(msg["sdpRequest"]["sdp"])
+                if not self.is_locked:
+                    self.is_locked = True
+                    LOGGER.info(f"INFO: SIGNALLING CHANNEL received sdpRequest {msg}")
 
-                wait_for_condition(lambda: self.webrtcbin_sdp is not None, self._app.max_timeout)
-                LOGGER.info(
-                    f"INFO: on_message, succesfully created local answer for webrtcbin on incoming SDP request..."
-                )
+                    self._on_received_sdp_request(msg["sdpRequest"]["sdp"])
 
-                # force goog-remb to be added to the answer
-                self.webrtcbin_sdp.add_attribute('rtcp-fb', f'{self.payload_type} goog-remb')
+                    wait_for_condition(lambda: self.webrtcbin_sdp is not None, self._app.max_timeout)
+                    LOGGER.info(
+                        f"INFO: on_message, succesfully created local answer for webrtcbin on incoming SDP request..."
+                    )
 
-                candidates = msg["sdpRequest"]["candidates"]
-                for candidate in candidates:
-                    LOGGER.info(f"INFO: on_message, adding ice candidate ... {candidate['candidate']}")
-                    self._app.webrtcbin.emit('add-ice-candidate', candidate['sdpMLineIndex'], candidate['candidate'])
+                    # force goog-remb to be added to the answer
+                    self.webrtcbin_sdp.add_attribute('rtcp-fb', f'{self.payload_type} goog-remb')
 
-                sdpResponse = {
-                    "sdpResponse": {
-                        "success": True,
-                        "uuid": msg["sdpRequest"]["uuid"],
-                        "sdp": self.webrtcbin_sdp.as_text(),
+                    candidates = msg["sdpRequest"]["candidates"]
+                    for candidate in candidates:
+                        LOGGER.info(f"INFO: on_message, adding ice candidate ... {candidate['candidate']}")
+                        self._app.webrtcbin.emit(
+                            'add-ice-candidate', candidate['sdpMLineIndex'], candidate['candidate']
+                        )
+
+                    sdpResponse = {
+                        "sdpResponse": {
+                            "success": True,
+                            "uuid": msg["sdpRequest"]["uuid"],
+                            "sdp": self.webrtcbin_sdp.as_text(),
+                        }
                     }
-                }
-                data = {"message": {"to": f"director.api_{self.api_key}", "payload": sdpResponse}}
-                self.signalling_channel.send(json.dumps(data))
+                    data = {"message": {"to": f"director.api_{self.api_key}", "payload": sdpResponse}}
+                    self.signalling_channel.send(json.dumps(data))
             elif "streamStopRequest" in msg:
                 # streamStopRequest is received when the stream is stopped on the Ahoy side
-                LOGGER.info(f"INFO: SIGNALLING CHANNEL received streamStopRequest {msg}")
-                self.terminate_webrtc_coro(is_restart_webrtc_coro=True)
+                if msg["streamStopRequest"]["feedUuid"] == self.feed_name:
+                    LOGGER.info(f"INFO: SIGNALLING CHANNEL received streamStopRequest {msg}")
+                    self.terminate_webrtc_coro(is_restart_webrtc_coro=True)
             else:
                 LOGGER.info(f"INFO: SIGNALLING CHANNEL received currently unhandled message {msg}")
 
@@ -343,7 +354,7 @@ class AhoyConnector:
                     self.agent.stop()
                     self.agent_thread.join()
                 self._app = None
-                LOGGER.info("OK: main webrtc coroutine need to be stopped on streamStopRequest, pending...")
+                LOGGER.info("OK: main webrtc coroutine is stopped on streamStopRequest, pending...")
                 return await self.webrtc_coro()
             else:
                 # this is on some internal exception where self.is_running is True and terminate_webrtc_coro was trigerred.
@@ -383,7 +394,7 @@ class AhoyConnector:
         self.webrtcbin_sdp = None
         if self._app is not None:
             if self._app.is_running:
-                self._app.send_eos()
+                self._app.send_termination_message_to_bus()
             else:
                 self._app.terminate_pipeline()
         if self.webrtc_coro_control_task is not None:
