@@ -24,11 +24,12 @@ class Controller:
     Controller class is responsible for applying actions and collecting observations (webrtc metrics)
     '''
 
-    def __init__(self):
+    def __init__(self, max_inactivity_time: float = 60.0):
         self.action_queue = asyncio.Queue()
         self.observation_queue = asyncio.Queue()
 
         self.is_started = False
+        self.max_inactivity_time = max_inactivity_time
 
     async def handle_actions(self, app: GstWebRTCBinApp) -> None:
         while True:

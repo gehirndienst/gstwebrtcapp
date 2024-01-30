@@ -91,15 +91,24 @@ class DrlEnv(Env):
                 return None
 
         is_obs = False
+        time_inactivity_starts = time.time()
         while not is_obs:
             stats = self.controller.get_observation()
             if stats is None:
-                # this could be triggered if you pulled all queue elements but none of them passed the check
-                LOGGER.info("WARNING: No correct stats were pulled from the observation queue, closing the env...")
-                self.is_finished = True
-                self.state = self._get_initial_state()
-                self.reward = 0.0
-                return None
+                # this could be triggered if you pulled all queue elements
+                # but none of them passed the check after max timeout defined in controller
+                if time.time() - time_inactivity_starts > self.controller.max_inactivity_time:
+                    LOGGER.warning(
+                        "WARNING: No stats were pulled from the observation queue after"
+                        f" {self.controller.max_inactivity_time} sec, closing the env..."
+                    )
+                    self.is_finished = True
+                    self.state = self._get_initial_state()
+                    self.reward = 0.0
+                    return None
+                else:
+                    LOGGER.warning("WARNING: No stats were pulled from the observation queue, waiting...")
+                    continue
             else:
                 is_obs = self.mdp.check_observation(stats)
         # do this to avoid stuck obs in the queue to take only the most recent one
