@@ -126,13 +126,13 @@ class QoeAhoy(RewardFunction):
         reward_plr = max(0, 1 - 5 * self.state["fractionLossRate"])
         reward_plr *= 0.2
 
-        # 4. jitter: 0...0.2
+        # 4. jitter: 0...0.15
         # max 250 ms, more than that is very bad, 10 ms jitter is considered to be acceptable
         thresholded_jitter = max(0, self.state["interarrivalJitter"] - 0.01)
         reward_jitter = max(0, 0.5 - np.sqrt(thresholded_jitter))
         reward_jitter *= 0.4
 
-        # 5. smooth: take rate of change: 0...0.05
+        # 5. smooth: take rate of change: 0...0.1
         rate_prev = self.prev_state["rxRate"] if self.prev_state is not None else 0.0
         rate_of_change = abs(self.state["rxRate"] - rate_prev)
         # don't penalize if bitrate changes less than 10% or if it's the first state
@@ -143,8 +143,8 @@ class QoeAhoy(RewardFunction):
         reward_pli = max(0, 1 - (self.state["fractionPliRate"] * 1000))
         reward_pli *= 0.075
 
-        # 7. nack rate should not be higher than 1%: 0..0.075
-        reward_nack = max(0, 1 - (self.state["fractionNackRate"] * 100))
+        # 7. nack rate should not be higher than 5%: 0..0.075
+        reward_nack = max(0, 1 - (self.state["fractionNackRate"] * 20))
         reward_nack *= 0.075
 
         # final

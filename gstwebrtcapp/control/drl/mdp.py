@@ -227,7 +227,7 @@ class AhoyBrowserMDP(MDP):
         fraction_queueing_rtt = rtt - min(self.rtts) if len(self.rtts) > 0 else 0.0
         # 5. gradient rtt
         gradient_rtt = (
-            rtt - (last_rtp_remote_inbound_stream["rb-round-trip"] / self.MAX_DELAY_SEC)
+            rtt - (ntp_short_format_to_seconds(last_rtp_remote_inbound_stream["rb-round-trip"]) / self.MAX_DELAY_SEC)
             if last_rtp_remote_inbound_stream is not None
             else 0.0
         )
