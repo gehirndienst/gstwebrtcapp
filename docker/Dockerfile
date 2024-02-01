@@ -124,7 +124,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN curl -sL https://deb.nodesource.com/setup_16.x | bash -s -- -y
 RUN apt-get update && apt-get install -y --fix-missing npm rust-src libnice-dev libpango1.0-dev libcairo2-dev webpack
 WORKDIR /opt
-RUN git clone https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs.git && cd gst-plugins-rs && cargo build
+RUN git clone --branch 0.11.3+fixup https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs.git && cd gst-plugins-rs && cargo build
 ENV GST_PLUGIN_PATH="/opt/gst-plugins-rs/target/debug:${GST_PLUGIN_PATH}"
 
 # CLONE GSTWEBRTCAPP
