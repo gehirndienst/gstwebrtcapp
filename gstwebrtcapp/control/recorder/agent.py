@@ -12,7 +12,7 @@ from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
 
-class CsvBrowserRecorderAgent(Agent):
+class CsvViewerRecorderAgent(Agent):
     def __init__(
         self,
         controller: Controller,
@@ -39,7 +39,7 @@ class CsvBrowserRecorderAgent(Agent):
     def run(self, _) -> None:
         time.sleep(self.warmup)
         self.is_running = True
-        LOGGER.info(f"INFO: Browser Recorder agent warmup {self.warmup} sec is finished, starting...")
+        LOGGER.info(f"INFO: Csv Viewer Recorder agent warmup {self.warmup} sec is finished, starting...")
         while self.is_running:
             gst_stats = self._fetch_stats()
             if gst_stats is not None:
@@ -89,8 +89,18 @@ class CsvBrowserRecorderAgent(Agent):
             else 0.0
         )
 
-        # fraction rx rate in Mbits
         ts_diff_sec = get_stat_diff(rtp_outbound, last_rtp_outbound, "timestamp") / 1000
+
+        # fraction tx rate in Mbits
+        bitrate = rtp_outbound["bitrate"]
+        if bitrate != 0:
+            tx_rate = rtp_outbound["bitrate"] / 1000000
+        else:
+            tx_bytes_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "bytes-sent")
+            tx_mbits_diff = tx_bytes_diff * 8 / 1000000
+            tx_rate = tx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
+
+        # fraction rx rate in Mbits
         rx_bytes_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "bytes-received")
         rx_mbits_diff = rx_bytes_diff * 8 / 1000000
         rx_rate = rx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
@@ -107,7 +117,7 @@ class CsvBrowserRecorderAgent(Agent):
 
         # opened to extensions
         final_stats = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f"),
+            "timestamp": datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3],
             "fraction_packets_lost": rtp_remote_inbound["rb-fractionlost"],
             "packets_lost": rtp_remote_inbound["rb-packetslost"],
             "loss_rate_%": loss_rate,
@@ -119,7 +129,7 @@ class CsvBrowserRecorderAgent(Agent):
             "pli_count": rtp_outbound["recv-pli-count"],
             "rx_packets": rtp_outbound["packets-received"],
             "rx_mbytes": rtp_outbound["bytes-received"] / 1000000,
-            "tx_rate_mbits": rtp_outbound["bitrate"] / 1000000,
+            "tx_rate_mbits": tx_rate,
             "rx_rate_mbits": rx_rate,
         }
 
@@ -129,9 +139,9 @@ class CsvBrowserRecorderAgent(Agent):
 
     def _save_stats_to_csv(self) -> None:
         if self.csv_handler is None:
-            datetime_now = datetime.datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+            datetime_now = datetime.now().strftime("%Y-%m-%d-%H_%M_%S_%f")[:-3]
             os.makedirs(self.log_path, exist_ok=True)
-            filename = os.path.join(self.log_path, f"webrtc_browser_{datetime_now}.csv")
+            filename = os.path.join(self.log_path, f"webrtc_viewer_{datetime_now}.csv")
             header = self.stats[-1].keys()
             self.csv_handler = open(filename, mode="a", newline="\n")
             self.csv_writer = csv.DictWriter(self.csv_handler, fieldnames=header)
@@ -142,7 +152,7 @@ class CsvBrowserRecorderAgent(Agent):
             self.csv_writer.writerow(self.stats[-1])
 
     def stop(self) -> None:
-        LOGGER.info("INFO: stopping Browser Recorder agent...")
+        LOGGER.info("INFO: stopping Csv Viewer Recorder agent...")
         self.is_running = False
         if self.csv_handler is not None:
             self.csv_handler.close()

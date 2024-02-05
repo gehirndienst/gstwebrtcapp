@@ -1,12 +1,21 @@
+'''
+Test main functionalities by replacing the default one with one of the desired coroutine presented above in the main() endpoint.
+
+Author:
+    - Nikita Smirnov <nsm@informatik.uni-kiel.de>
+'''
+
 import asyncio
 
-from ahoyapp.app import DEFAULT_CUDA_PIPELINE, GstWebRTCBinAppConfig
-from ahoyapp.connector import AhoyConnector
+from apps.app import GstWebRTCAppConfig
+from apps.ahoyapp.connector import AhoyConnector
+from apps.pipelines import DEFAULT_BIN_CUDA_PIPELINE, DEFAULT_SINK_PIPELINE
+from apps.sinkapp.connector import SinkConnector
 from control.controller import Controller
-from control.drl.agent import DRLAgent
+from control.drl.agent import DrlAgent
 from control.drl.config import DrlConfig
-from control.drl.mdp import AhoyBrowserMDP
-from control.recorder.agent import CsvBrowserRecorderAgent
+from control.drl.mdp import ViewerMDP
+from control.recorder.agent import CsvViewerRecorderAgent
 from utils.base import LOGGER
 
 try:
@@ -42,7 +51,7 @@ async def manipulate_video_coro(conn: AhoyConnector):
 async def test_manipulate_video():
     # run it to test video manipulation.
     try:
-        cfg = GstWebRTCBinAppConfig(video_url=VIDEO_SOURCE)
+        cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         conn = AhoyConnector(
             server=AHOY_DIRECTOR_URL,
@@ -65,9 +74,9 @@ async def test_manipulate_video():
 async def test_nvenc():
     # run it to test nvenc hardware acceleration.
     try:
-        cfg = GstWebRTCBinAppConfig(
+        cfg = GstWebRTCAppConfig(
             video_url="VIDEO_SOURCE",
-            pipeline_str=DEFAULT_CUDA_PIPELINE,
+            pipeline_str=DEFAULT_BIN_CUDA_PIPELINE,
             encoder_gst_name="nvh264enc",
         )
 
@@ -87,13 +96,13 @@ async def test_nvenc():
 
 
 async def test_csv_recorder():
-    # run it to test csv recorder agent
+    # run it to test csv viewer recorder agent
     try:
-        cfg = GstWebRTCBinAppConfig(video_url=VIDEO_SOURCE)
+        cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         stats_update_interval = 1.0
 
-        agent = CsvBrowserRecorderAgent(
+        agent = CsvViewerRecorderAgent(
             controller=Controller(),
             stats_update_interval=stats_update_interval,
             warmup=10.0,
@@ -125,9 +134,9 @@ async def test_drl():
         episode_length = 50
         stats_update_interval = 3.0
 
-        app_cfg = GstWebRTCBinAppConfig(video_url=VIDEO_SOURCE)
+        app_cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
-        agent = DRLAgent(
+        agent = DrlAgent(
             config=DrlConfig(
                 mode="train",
                 model_name="sac",
@@ -146,9 +155,10 @@ async def test_drl():
                 verbose=2,
             ),
             controller=Controller(),
-            mdp=AhoyBrowserMDP(
+            mdp=ViewerMDP(
                 reward_function_name="qoe_ahoy",
                 episode_length=episode_length,
+                constants={"MAX_BITRATE_STREAM_MBPS": 6},  # Ahoy fixes the max bitrate to 6 Mbps in SDP
             ),
         )
 
@@ -169,9 +179,30 @@ async def test_drl():
         return
 
 
-async def main():
+async def test_sink_app():
+    # run to test sink app. NOTE: you need to have a running signalling server and JS client to test this.
+    # Check: https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs/-/tree/main/net/webrtc?ref_type=heads#usage
     try:
-        cfg = GstWebRTCBinAppConfig(video_url=VIDEO_SOURCE)
+        cfg = GstWebRTCAppConfig(
+            pipeline_str=DEFAULT_SINK_PIPELINE,
+            bitrate=6000,
+            video_url=VIDEO_SOURCE,
+        )
+
+        conn = SinkConnector(
+            pipeline_config=cfg,
+        )
+
+        await conn.webrtc_coro()
+
+    except KeyboardInterrupt:
+        LOGGER.info("KeyboardInterrupt received, exiting...")
+        return
+
+
+async def default():
+    try:
+        cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         conn = AhoyConnector(
             server=AHOY_DIRECTOR_URL,
@@ -191,4 +222,4 @@ async def main():
 if __name__ == "__main__":
     if uvloop is not None:
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-    asyncio.run(main())
+    asyncio.run(default())

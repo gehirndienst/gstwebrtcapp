@@ -8,7 +8,7 @@ from control.drl.mdp import MDP
 from utils.base import LOGGER
 
 
-class DRLAgent(Agent):
+class DrlAgent(Agent):
     def __init__(
         self,
         controller: Controller,

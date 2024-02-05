@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 import collections
 from gymnasium import spaces
 import numpy as np
-from typing import Any, Deque, Dict, OrderedDict, Tuple
+from typing import Any, Dict, OrderedDict, Tuple
 
 from control.drl.reward import RewardFunctionFactory
 from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff
@@ -34,8 +34,8 @@ class MDP(metaclass=ABCMeta):
         **kwargs,
     ) -> None:
         self.reward_function = RewardFunctionFactory().create_reward_function(reward_function_name)
-        self.state_history_size = state_history_size
         self.episode_length = episode_length
+        self.state_history_size = state_history_size
         if constants is not None:
             for key in constants:
                 self.CONSTANTS[key] = constants[key]
@@ -106,9 +106,9 @@ class MDP(metaclass=ABCMeta):
         return step >= self.episode_length
 
 
-class AhoyBrowserMDP(MDP):
+class ViewerMDP(MDP):
     '''
-    This MDP is used for the Ahoy engine. This version takes BROWSER stats delivered by GStreamer.
+    This MDP takes VIEWER (aka BROWSER) stats delivered by GStreamer.
     '''
 
     def __init__(
@@ -137,44 +137,40 @@ class AhoyBrowserMDP(MDP):
 
     def create_observation_space(self) -> spaces.Dict:
         # normalized to [0, 1]
-        return spaces.Dict(
-            {
-                "fractionLossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "fractionNackRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "fractionPliRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "fractionQueueingRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "fractionRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "gradientRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "interarrivalJitter": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "lossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "rttMean": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "rttStd": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "rxRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-                "txRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            }
-        )
+        return spaces.Dict({
+            "fractionLossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "fractionNackRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "fractionPliRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "fractionQueueingRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "fractionRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "gradientRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "interarrivalJitter": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "lossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "rttMean": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "rttStd": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "rxRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            "txRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+        })
 
     def create_action_space(self) -> spaces.Space:
         # basic AS uses only bitrate, normalized to [-1, 1]
         return spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
 
     def make_default_state(self) -> OrderedDict[str, Any]:
-        return collections.OrderedDict(
-            {
-                "fractionLossRate": 0.0,
-                "fractionNackRate": 0.0,
-                "fractionPliRate": 0.0,
-                "fractionQueueingRtt": 0.0,
-                "fractionRtt": 0.0,
-                "gradientRtt": 0.0,
-                "interarrivalJitter": 0.0,
-                "lossRate": 0.0,
-                "rttMean": 0.0,
-                "rttStd": 0.0,
-                "rxRate": 0.0,
-                "txRate": 0.0,
-            }
-        )
+        return collections.OrderedDict({
+            "fractionLossRate": 0.0,
+            "fractionNackRate": 0.0,
+            "fractionPliRate": 0.0,
+            "fractionQueueingRtt": 0.0,
+            "fractionRtt": 0.0,
+            "gradientRtt": 0.0,
+            "interarrivalJitter": 0.0,
+            "lossRate": 0.0,
+            "rttMean": 0.0,
+            "rttStd": 0.0,
+            "rxRate": 0.0,
+            "txRate": 0.0,
+        })
 
     def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
         super().make_state(stats)
@@ -248,25 +244,29 @@ class AhoyBrowserMDP(MDP):
         rx_rate = rx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
 
         # 12. tx rate
-        tx_rate = rtp_outbound["bitrate"] / 1000000 / self.MAX_BITRATE_STREAM_MBPS
+        bitrate = rtp_outbound["bitrate"]
+        if bitrate != 0:
+            tx_rate = rtp_outbound["bitrate"] / 1000000 / self.MAX_BITRATE_STREAM_MBPS
+        else:
+            tx_bytes_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "bytes-sent")
+            tx_mbits_diff = tx_bytes_diff * 8 / 1000000
+            tx_rate = tx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
 
         # form the final state
-        state = collections.OrderedDict(
-            {
-                "fractionLossRate": fraction_loss_rate,
-                "fractionNackRate": fraction_nack_rate,
-                "fractionPliRate": fraction_pli_rate,
-                "fractionQueueingRtt": fraction_queueing_rtt,
-                "fractionRtt": rtt,
-                "gradientRtt": gradient_rtt,
-                "interarrivalJitter": interarrival_jitter,
-                "lossRate": loss_rate,
-                "rttMean": rtt_mean,
-                "rttStd": rtt_std,
-                "rxRate": rx_rate,
-                "txRate": tx_rate,
-            }
-        )
+        state = collections.OrderedDict({
+            "fractionLossRate": fraction_loss_rate,
+            "fractionNackRate": fraction_nack_rate,
+            "fractionPliRate": fraction_pli_rate,
+            "fractionQueueingRtt": fraction_queueing_rtt,
+            "fractionRtt": rtt,
+            "gradientRtt": gradient_rtt,
+            "interarrivalJitter": interarrival_jitter,
+            "lossRate": loss_rate,
+            "rttMean": rtt_mean,
+            "rttStd": rtt_std,
+            "rxRate": rx_rate,
+            "txRate": tx_rate,
+        })
 
         self.last_stats = stats
         self.last_states.append(state)
@@ -274,22 +274,20 @@ class AhoyBrowserMDP(MDP):
 
     def convert_to_unscaled_state(self, state: OrderedDict[str, Any]) -> OrderedDict[str, Any]:
         return (
-            collections.OrderedDict(
-                {
-                    "fractionLossRate": state["fractionLossRate"],
-                    "fractionNackRate": state["fractionNackRate"],
-                    "fractionPliRate": state["fractionPliRate"],
-                    "fractionQueueingRtt": state["fractionQueueingRtt"] * self.MAX_DELAY_SEC,
-                    "fractionRtt": state["fractionRtt"] * self.MAX_DELAY_SEC,
-                    "gradientRtt": state["gradientRtt"] * self.MAX_DELAY_SEC,
-                    "interarrivalJitter": state["interarrivalJitter"] * self.MAX_DELAY_SEC,
-                    "lossRate": state["lossRate"],
-                    "rttMean": state["rttMean"] * self.MAX_DELAY_SEC,
-                    "rttStd": state["rttStd"] * self.MAX_DELAY_SEC,
-                    "rxRate": state["rxRate"] * self.MAX_BITRATE_STREAM_MBPS,
-                    "txRate": state["txRate"] * self.MAX_BITRATE_STREAM_MBPS,
-                }
-            )
+            collections.OrderedDict({
+                "fractionLossRate": state["fractionLossRate"],
+                "fractionNackRate": state["fractionNackRate"],
+                "fractionPliRate": state["fractionPliRate"],
+                "fractionQueueingRtt": state["fractionQueueingRtt"] * self.MAX_DELAY_SEC,
+                "fractionRtt": state["fractionRtt"] * self.MAX_DELAY_SEC,
+                "gradientRtt": state["gradientRtt"] * self.MAX_DELAY_SEC,
+                "interarrivalJitter": state["interarrivalJitter"] * self.MAX_DELAY_SEC,
+                "lossRate": state["lossRate"],
+                "rttMean": state["rttMean"] * self.MAX_DELAY_SEC,
+                "rttStd": state["rttStd"] * self.MAX_DELAY_SEC,
+                "rxRate": state["rxRate"] * self.MAX_BITRATE_STREAM_MBPS,
+                "txRate": state["txRate"] * self.MAX_BITRATE_STREAM_MBPS,
+            })
             if self.is_scaled
             else state
         )

@@ -22,13 +22,14 @@ import threading
 import gi
 
 gi.require_version('Gst', '1.0')
-gi.require_version('GstWebRTC', '1.0')
 gi.require_version('GstSdp', '1.0')
+gi.require_version('GstWebRTC', '1.0')
+from gi.repository import Gst
 from gi.repository import GstSdp
 from gi.repository import GstWebRTC
-from gi.repository import Gst
 
-from ahoyapp.app import GstWebRTCBinApp, GstWebRTCBinAppConfig
+from apps.app import GstWebRTCAppConfig
+from apps.ahoyapp.app import AhoyApp
 from control.agent import Agent
 from utils.base import LOGGER, wait_for_condition, async_wait_for_condition
 from utils.gst import stats_to_dict
@@ -40,7 +41,7 @@ class AhoyConnector:
 
     :param str server: AhoyMedia server URL.
     :param str api_key: AhoyMedia API key.
-    :param GstWebRTCBinAppConfig pipeline_config: Configuration for the GStreamer WebRTC pipeline.
+    :param GstWebRTCAppConfig pipeline_config: Configuration for the GStreamer WebRTC pipeline.
     :param Agent agent: AI-enhanced agent that optionally controls the quality of the video via GStreamer. Nullable.
     :param str feed_name: Feed name for the connection.
     :param str signalling_channel_name: Name of the signalling channel.
@@ -52,7 +53,7 @@ class AhoyConnector:
         self,
         server: str,
         api_key: str,
-        pipeline_config: GstWebRTCBinAppConfig = GstWebRTCBinAppConfig(),
+        pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
         agent: Agent | None = None,
         feed_name: str = "gstreamerwebrtcapp",
         signalling_channel_name: str = "control",
@@ -207,7 +208,7 @@ class AhoyConnector:
         async def on_message(msg) -> None:
             # TODO: currently nothing comes from Ahoy to trigger this handler
             LOGGER.info(f"INFO: STATS CHANNEL received stats message {msg}")
-            self.ahoy_stats.append((datetime.now().strftime('%H:%M:%S.%f')[:-3], msg))
+            self.ahoy_stats.append((datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3], msg))
 
     def _on_received_sdp_request(self, sdp) -> None:
         LOGGER.info(f"INFO: _on_received_sdp_request callback, processing the incoming SDP request...")
@@ -218,11 +219,13 @@ class AhoyConnector:
 
         # NOTE: the app (GstPipeline) starts first when the video content is requested. Before that this object is None
         try:
-            self._app = GstWebRTCBinApp(self.pipeline_config)
+            self._app = AhoyApp(self.pipeline_config)
+            if self._app is None:
+                LOGGER.error(f"ERROR: _on_received_sdp_request callback, failed to create AhoyApp object")
+                self.terminate_webrtc_coro()
         except Exception as e:
             LOGGER.error(
-                "ERROR: _on_received_sdp_request callback, failed to create GstWebRTCBinApp object"
-                f", reason: {str(e)}..."
+                f"ERROR: _on_received_sdp_request callback, failed to create AhoyApp object due to an excepion:\n {str(e)}..."
             )
             self.terminate_webrtc_coro()
         wait_for_condition(lambda: self._app.is_webrtc_ready(), self._app.max_timeout)
@@ -316,7 +319,7 @@ class AhoyConnector:
             await asyncio.sleep(self.stats_update_interval)
             promise = Gst.Promise.new_with_change_func(self._on_get_webrtcbin_stats, None, None)
             self._app.webrtcbin.emit('get-stats', None, promise)
-        LOGGER.info(f"OK: GST STATS HANDLER IS OFF!")
+        LOGGER.info(f"OK: WEBRTCBIN STATS HANDLER IS OFF!")
 
     async def webrtc_coro(self) -> None:
         while not (self._app and self._app.is_running):
@@ -401,5 +404,5 @@ class AhoyConnector:
             self.webrtc_coro_control_task.cancel()
 
     @property
-    def app(self) -> GstWebRTCBinApp | None:
+    def app(self) -> AhoyApp | None:
         return self._app

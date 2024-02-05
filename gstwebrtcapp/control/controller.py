@@ -15,7 +15,7 @@ License:
 import asyncio
 from typing import Any, Dict, Optional
 
-from ahoyapp.app import GstWebRTCBinApp
+from apps.app import GstWebRTCApp
 from utils.base import LOGGER
 
 
@@ -31,7 +31,7 @@ class Controller:
         self.is_started = False
         self.max_inactivity_time = max_inactivity_time
 
-    async def handle_actions(self, app: GstWebRTCBinApp) -> None:
+    async def handle_actions(self, app: GstWebRTCApp) -> None:
         while True:
             action_msg: Dict[str, Any] = await self.action_queue.get()
             if app is not None and len(action_msg) > 0:
