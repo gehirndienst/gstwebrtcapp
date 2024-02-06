@@ -34,3 +34,9 @@ DEFAULT_SINK_PIPELINE = '''
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate !
     video/x-raw,format=I420,framerate=25/1 ! queue ! ws.
 '''
+
+DEFAULT_SINK_H265_PIPELINE = '''
+    webrtcsink name=ws signaller::uri=ws://127.0.0.1:8443 do-retransmission=true do-fec=true congestion-control=disabled
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph265depay ! h265parse ! avdec_h265 ! videoconvert ! videoscale ! videorate !
+    video/x-raw,format=I420,framerate=25/1 ! queue ! ws.
+'''
