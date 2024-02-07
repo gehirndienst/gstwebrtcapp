@@ -2,7 +2,7 @@ from enum import Enum
 import re
 from typing import Any, Dict
 
-GST_ENCODERS = ["x264enc", "nvh264enc", "x265enc", "vp8enc", "vp9enc"]
+GST_ENCODERS = ["x264enc", "nvh264enc", "x265enc", "vp8enc", "vp9enc", "av1enc", "rav1enc"]
 
 DEFAULT_GCC_SETTINGS = {
     "min-bitrate": 100000,

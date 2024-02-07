@@ -133,6 +133,8 @@ class AhoyApp(GstWebRTCApp):
             self.encoder.set_property("bitrate", bitrate_kbps)
         elif self.encoder_gst_name.startswith("vp"):
             self.encoder.set_property("target-bitrate", bitrate_kbps * 1000)
+        elif self.encoder_gst_name.startswith("av1"):
+            self.encoder.set_property("target-bitrate", bitrate_kbps)
         else:
             raise GSTWEBRTCAPP_EXCEPTION(f"encoder {self.encoder_gst_name} is not supported")
 

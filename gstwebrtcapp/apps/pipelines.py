@@ -20,6 +20,15 @@ DEFAULT_BIN_PIPELINE = '''
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126, rtcp-fb-goog-remb=(boolean)true, rtcp-fb-transport-cc=(boolean)true" ! webrtc.
 '''
 
+DEFAULT_BIN_AV1_PIPELINE = '''
+    webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate !
+    capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! queue !
+    av1enc name=encoder usage-profile=realtime qos=true cpu-used=4 ! av1parse !
+    rtpav1pay name=payloader ! queue !
+    capsfilter name=payloader_capsfilter ! webrtc.
+'''
+
 DEFAULT_BIN_CUDA_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
