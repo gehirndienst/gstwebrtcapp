@@ -77,7 +77,8 @@ async def test_nvenc():
         cfg = GstWebRTCAppConfig(
             video_url="VIDEO_SOURCE",
             pipeline_str=DEFAULT_BIN_CUDA_PIPELINE,
-            encoder_gst_name="nvh264enc",
+            codec="h264",
+            is_cuda=True,
         )
 
         conn = AhoyConnector(

@@ -107,7 +107,7 @@ class AhoyConnector:
         data = {
             "sdp": self.pc_out.localDescription.sdp,
             "candidates": "",
-            "capabilities": {"video": {"codecs": ["H265", "AV1", "H264"]}},
+            "capabilities": {"video": {"codecs": [self.pipeline_config.codec.upper()]}},
             "name": self.feed_name,
         }
         request = requests.post(

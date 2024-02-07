@@ -29,7 +29,7 @@ from gi.repository import GstWebRTC
 
 from apps.pipelines import DEFAULT_BIN_PIPELINE
 from utils.base import LOGGER, GSTWEBRTCAPP_EXCEPTION, wait_for_condition
-from utils.gst import GST_ENCODERS
+from utils.gst import get_gst_encoder_name
 
 
 @dataclass
@@ -39,35 +39,28 @@ class GstWebRTCAppConfig:
 
     :param str pipeline_str: GStreamer pipeline string. Default is the default pipeline string for webrtcbin.
     :param str video_url: URL of the video source (RTSP, RTMP, FILE, etc.)
-    :param str encoder_gst_name: Name of the video encoder GStreamer element. Default is "x264enc".
+    :param str codec: Name of the video codec (encoder). Default is "h264". Possible options are "h264", "h265", "vp8", "vp9", "av1".
     :param int bitrate: Bitrate of the video in Kbps. Default is 2000.
-    :param Dict[str, int] resolution: Dictionary containing width and height of the video resolution. Default is (1280, 720).
+    :param Dict[str, int] resolution: Dictionary containing width and height of the video resolution. Default is {"width": 1280, "height": 720}.
     :param int framerate: Frame rate of the video. Default is 20.
     :param int fec_percentage: Forward error correction percentage. Default is 20.
     :param List[Dict[str, Any]] data_channels_cfgs: List of dictionaries containing data channel configurations.
     :param int max_timeout: Maximum timeout for operations in seconds. Default is 60.
+    :param bool is_cuda: Flag indicating whether the pipeline uses CUDA for HA encoding. Currently only H264 is supported. Default is False.
     :param bool is_debug: Flag indicating whether debugging GStreamer logs are enabled. Default is False.
     """
 
     pipeline_str: str = DEFAULT_BIN_PIPELINE
     video_url: str | None = None
-    encoder_gst_name: str = "x264enc"
+    codec: str = "h264"
     bitrate: int = 2000
     resolution: Dict[str, int] = field(default_factory=lambda: {"width": 1280, "height": 720})
     framerate: int = 20
     fec_percentage: int = 20
     data_channels_cfgs: List[Dict[str, Any]] = field(default_factory=lambda: [])
     max_timeout: int = 60
+    is_cuda: bool = False
     is_debug: bool = False
-
-
-class GstWebRTCAppType(enum.Enum):
-    """
-    Enumeration class for GstWebRTCApp types.
-    """
-
-    AHOY = "ahoy"
-    SINK = "sink"
 
 
 class GstWebRTCApp(metaclass=ABCMeta):
@@ -79,9 +72,8 @@ class GstWebRTCApp(metaclass=ABCMeta):
         # NOTE: call super().__init__() in the derived classes AFTER declaring their GST instance variables
         self.pipeline_str = config.pipeline_str
         self.video_url = config.video_url
-        self.encoder_gst_name = config.encoder_gst_name if config.encoder_gst_name in GST_ENCODERS else "x264enc"
-
-        self.is_cuda = self.encoder_gst_name == "nvh264enc"
+        self.encoder_gst_name = get_gst_encoder_name(config.codec, config.is_cuda)
+        self.is_cuda = config.is_cuda
         if self.is_cuda:
             # FIXME: replace it later with a custom configurator
             pattern = re.compile(r'(!\s*.*?name=encoder.*?!)')

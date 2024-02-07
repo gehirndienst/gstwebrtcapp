@@ -2,14 +2,36 @@ from enum import Enum
 import re
 from typing import Any, Dict
 
-GST_ENCODERS = ["x264enc", "nvh264enc", "x265enc", "vp8enc", "vp9enc", "av1enc", "rav1enc"]
 
+# encoder
+CODECS = ["h264", "h265", "vp8", "vp9", "av1"]
+GST_ENCODERS = ["x264enc", "nvh264enc", "x265enc", "vp8enc", "vp9enc", "av1enc"]
+
+
+def get_gst_encoder_name(codec: str, is_cuda: bool = False) -> str:
+    # TODO: add cuda support for other codecs later
+    if codec == "h264":
+        return "x264enc" if not is_cuda else "nvh264enc"
+    elif codec == "h265":
+        return "x265enc"
+    elif codec == "vp8":
+        return "vp8enc"
+    elif codec == "vp9":
+        return "vp9enc"
+    elif codec == "av1":
+        return "av1enc"
+    else:
+        raise ValueError(f"Invalid codec: {codec}")
+
+
+# gcc
 DEFAULT_GCC_SETTINGS = {
     "min-bitrate": 100000,
     "max-bitrate": 20000000,
 }
 
 
+# stats
 class GstWebRTCStatsType(Enum):
     CODEC = "codec"
     ICE_CANDIDATE_LOCAL = "ice-candidate-local"
