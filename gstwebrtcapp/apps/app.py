@@ -74,7 +74,7 @@ class GstWebRTCApp(metaclass=ABCMeta):
         self.video_url = config.video_url
         self.encoder_gst_name = get_gst_encoder_name(config.codec, config.is_cuda)
         self.is_cuda = config.is_cuda
-        if self.is_cuda:
+        if self.is_cuda and config.codec == "h264":
             # FIXME: replace it later with a custom configurator
             pattern = re.compile(r'(!\s*.*?name=encoder.*?!)')
             replacement_line = '! nvh264enc name=encoder preset=low-latency-hq !'
