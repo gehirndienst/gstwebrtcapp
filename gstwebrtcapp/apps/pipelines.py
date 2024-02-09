@@ -28,6 +28,15 @@ DEFAULT_H265_IN_WEBRTCBIN_H264_OUT_PIPELINE = '''
     rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1380 ! queue !
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126, rtcp-fb-goog-remb=(boolean)true, rtcp-fb-transport-cc=(boolean)true" ! webrtc.
 '''
+
+DEFAULT_H265_IN_WEBRTCBIN_H264_OUT_CUDA_PIPELINE = '''
+    webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph265depay ! h265parse ! avdec_h265 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
+    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! queue ! 
+    nvh264enc name=encoder preset=low-latency-hq gop-size=2560 rc-mode=cbr-ld-hq zerolatency=true ! 
+    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1380 ! queue ! 
+    capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
+'''
 # NOTE: Chrome does not play HEVC, a black screen
 DEFAULT_WEBRTCBIN_H265_OUT_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
@@ -37,6 +46,16 @@ DEFAULT_WEBRTCBIN_H265_OUT_PIPELINE = '''
     rtph265pay name=payloader auto-header-extension=true config-interval=1 mtu=1380 ! queue !
     capsfilter name=payloader_capsfilter ! webrtc.
 '''
+
+DEFAULT_WEBRTCBIN_H265_OUT_CUDA_PIPELINE = '''
+    webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert !
+    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory),format=I420 ! queue !
+    nvh265enc name=encoder preset=low-latency-hq gop-size=2560 rc-mode=cbr-ld-hq zerolatency=true ! h265parse ! 
+    rtph265pay name=payloader auto-header-extension=true config-interval=1 mtu=1380 ! queue !
+    capsfilter name=payloader_capsfilter ! webrtc.
+'''
+
 # works excellent
 DEFAULT_WEBRTCBIN_VP8_OUT_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
@@ -71,7 +90,7 @@ DEFAULT_BIN_CUDA_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
     capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! queue ! 
-    nvh264enc name=encoder preset=low-latency-hq gop-size=2560 rc-mode=cbr-ld-hq zerolatency=true threads=4 ! 
+    nvh264enc name=encoder preset=low-latency-hq gop-size=2560 rc-mode=cbr-ld-hq zerolatency=true ! 
     rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1380 ! queue !
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
 '''

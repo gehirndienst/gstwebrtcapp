@@ -78,9 +78,9 @@ class GstWebRTCApp(metaclass=ABCMeta):
             # FIXME: add support for inserting cudaupload and cudaconvert into the pipeline
             pattern = re.compile(r'(!\s*.*?name=encoder.*?!)')
             replacement_line = (
-                '! nvh264enc name=encoder preset=low-latency-hq !'
+                '! nvh264enc name=encoder preset=low-latency-hq gop-size=2560 rc-mode=cbr-ld-hq zerolatency=true !'
                 if config.codec == 'h264'
-                else '! nvh265enc name=encoder preset=low-latency-hq !'
+                else '! nvh265enc name=encoder preset=low-latency-hq gop-size=2560 rc-mode=cbr-ld-hq zerolatency=true !'
             )
             self.pipeline_str = pattern.sub(replacement_line, self.pipeline_str)
 
