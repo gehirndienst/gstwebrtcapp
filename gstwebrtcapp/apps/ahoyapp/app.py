@@ -15,7 +15,6 @@ License:
 from collections import deque
 from datetime import datetime
 from typing import List
-import warnings
 import gi
 
 gi.require_version("Gst", "1.0")
@@ -28,6 +27,7 @@ from gi.repository import GstWebRTC
 from apps.app import GstWebRTCApp, GstWebRTCAppConfig
 from apps.pipelines import DEFAULT_BIN_PIPELINE
 from utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER
+from utils.gst import DEFAULT_GCC_SETTINGS
 
 
 class AhoyApp(GstWebRTCApp):
@@ -224,8 +224,18 @@ class AhoyApp(GstWebRTCApp):
         LOGGER.info(f"ACTION: set fec percentage to {percentage}")
 
     def _cb_add_gcc(self, _, __) -> Gst.Element:
-        self.gcc.set_property("min-bitrate", 100000)
-        self.gcc.set_property("max-bitrate", 20000000)
+        min_bitrate = (
+            self.gcc_settings["min-bitrate"]
+            if "min-bitrate" in self.gcc_settings
+            else DEFAULT_GCC_SETTINGS["min-bitrate"]
+        )
+        max_bitrate = (
+            self.gcc_settings["max-bitrate"]
+            if "max-bitrate" in self.gcc_settings
+            else DEFAULT_GCC_SETTINGS["max-bitrate"]
+        )
+        self.gcc.set_property("min-bitrate", min_bitrate)
+        self.gcc.set_property("max-bitrate", max_bitrate)
         self.gcc.set_property("estimated-bitrate", self.bitrate * 1000)
         self.gcc.connect("notify::estimated-bitrate", self._on_estimated_bitrate_changed)
         return self.gcc
