@@ -1,6 +1,6 @@
 from enum import Enum
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 # encoder
@@ -26,8 +26,8 @@ def get_gst_encoder_name(codec: str, is_cuda: bool = False) -> str:
 
 # gcc
 DEFAULT_GCC_SETTINGS = {
-    "min-bitrate": 100000,
-    "max-bitrate": 20000000,
+    "min-bitrate": 400000,  # 0.4 mbps
+    "max-bitrate": 20000000,  # 20 mbps
 }
 
 
@@ -94,12 +94,24 @@ def _cast_stat_dict(data_dict: Dict[str, Any]) -> Dict[str, Any]:
     return cast_dict
 
 
-def find_stat(stats: Dict[str, Any], stat: GstWebRTCStatsType) -> Dict[str, Any] | None:
+def find_stat(stats: Dict[str, Any], stat: GstWebRTCStatsType) -> List[Dict[str, Any]]:
+    res = []
     for key in stats:
         if key.startswith(stat.value):
-            return stats[key]
-    return None
+            res.append(stats[key])
+    return res
 
 
-def get_stat_diff(stats: Dict[str, Any], last_stats: Dict[str, Any], stat: str) -> float | int:
+def get_stat_diff(stats: Dict[str, Any], last_stats: Dict[str, Any] | None, stat: str) -> float | int:
     return stats[stat] - last_stats[stat] if last_stats is not None else stats[stat]
+
+
+def is_same_rtcp(rtp_inbound: Dict[str, Any], last_rtp_inbound: Dict[str, Any] | None) -> bool:
+    if last_rtp_inbound is None:
+        return False
+    else:
+        # check if rtt and jitter are absolutely the same
+        return (
+            rtp_inbound["rb-round-trip"] == last_rtp_inbound["rb-round-trip"]
+            and rtp_inbound["rb-jitter"] == last_rtp_inbound["rb-jitter"]
+        )

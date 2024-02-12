@@ -8,7 +8,7 @@ from typing import Any, Dict
 from control.agent import Agent, AgentType
 from control.controller import Controller
 from utils.base import LOGGER
-from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff
+from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, is_same_rtcp
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
 
@@ -28,7 +28,9 @@ class CsvViewerRecorderAgent(Agent):
         self.verbose = min(verbose, 2)
         self.type = AgentType.RECORDER
 
-        self.stats = deque(maxlen=10000)
+        # cooked stats
+        self.stats = []
+        # raw gst stats
         self.last_stats = None
 
         self.csv_handler = None
@@ -58,8 +60,8 @@ class CsvViewerRecorderAgent(Agent):
         while gst_stats is None:
             time.sleep(0.1)
             ticks += 1
-            if ticks > 10:
-                LOGGER.info("WARNING: No stats were pulled from the observation queue after 1 second timeout...")
+            if ticks > 30:
+                LOGGER.info("WARNING: No stats were pulled from the observation queue after 3 seconds timeout...")
                 return None
             else:
                 gst_stats = self.controller.get_observation()
@@ -67,73 +69,89 @@ class CsvViewerRecorderAgent(Agent):
 
     def _select_stats(self, gst_stats: Dict[str, Any]) -> bool:
         rtp_outbound = find_stat(gst_stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
-        rtp_remote_inbound = find_stat(gst_stats, GstWebRTCStatsType.RTP_REMOTE_INBOUND_STREAM)
-        if rtp_outbound is None or rtp_remote_inbound is None:
-            LOGGER.info("WARNING: No RTP outbound or remote inbound stats were found in the GStreamer stats...")
+        rtp_inbound = find_stat(gst_stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
+        ice_candidate_pair = find_stat(gst_stats, GstWebRTCStatsType.ICE_CANDIDATE_PAIR)
+        if not rtp_outbound or not rtp_inbound or not ice_candidate_pair:
+            LOGGER.info("WARNING: Csv Viewer Recorder agent: no stats were found...")
             return False
 
         # last stats
         last_rtp_outbound = (
             find_stat(self.last_stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM) if self.last_stats is not None else None
         )
-        last_rtp_remote_inbound = (
-            find_stat(self.last_stats, GstWebRTCStatsType.RTP_REMOTE_INBOUND_STREAM)
-            if self.last_stats is not None
-            else None
+        last_rtp_inbound = (
+            find_stat(self.last_stats, GstWebRTCStatsType.RTP_INBOUND_STREAM) if self.last_stats is not None else None
         )
+        if last_rtp_outbound is None or last_rtp_inbound is None:
+            self.last_stats = gst_stats
+            return False
 
-        # loss rate
-        loss_rate = (
-            float(rtp_remote_inbound["rb-packetslost"]) / rtp_outbound["packets-sent"]
-            if rtp_outbound["packets-sent"] > 0
-            else 0.0
-        )
+        # len(rtp_inbound) = number of viewers. Iterate by their ssrc
+        # outbound stats are the same for all viewers
+        for i, rtp_inbound_ssrc in enumerate(rtp_inbound):
+            if 0 <= i < len(last_rtp_inbound) and is_same_rtcp(rtp_inbound_ssrc, last_rtp_inbound[i]):
+                # no changes in stats, either no feedback or the client is not playing but stats are not evicted yet
+                continue
+            # ssrc
+            ssrc = rtp_inbound_ssrc["ssrc"]
 
-        ts_diff_sec = get_stat_diff(rtp_outbound, last_rtp_outbound, "timestamp") / 1000
+            # loss rate
+            loss_rate = (
+                float(rtp_inbound_ssrc["rb-packetslost"]) / rtp_outbound[0]["packets-sent"]
+                if rtp_outbound[0]["packets-sent"] > 0
+                else 0.0
+            )
 
-        # fraction tx rate in Mbits
-        bitrate = rtp_outbound["bitrate"]
-        if bitrate != 0:
-            tx_rate = rtp_outbound["bitrate"] / 1000000
-        else:
-            tx_bytes_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "bytes-sent")
-            tx_mbits_diff = tx_bytes_diff * 8 / 1000000
-            tx_rate = tx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
+            ts_diff_sec = get_stat_diff(rtp_outbound[0], last_rtp_outbound[0], "timestamp") / 1000
 
-        # fraction rx rate in Mbits
-        rx_bytes_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "bytes-received")
-        rx_mbits_diff = rx_bytes_diff * 8 / 1000000
-        rx_rate = rx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
+            # fraction tx rate in Mbits
+            try:
+                bitrate_sent = ice_candidate_pair[0]["bitrate-sent"]
+                tx_rate = bitrate_sent / 1000000
+            except KeyError:
+                tx_bytes_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound[0], "bytes-sent")
+                tx_mbits_diff = tx_bytes_diff * 8 / 1000000
+                tx_rate = tx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
 
-        # rtts / jitter
-        rtt_ms = ntp_short_format_to_seconds(rtp_remote_inbound["rb-round-trip"]) * 1000
-        last_rtt_ms = (
-            ntp_short_format_to_seconds(last_rtp_remote_inbound["rb-round-trip"]) * 1000
-            if last_rtp_remote_inbound is not None
-            else 0.0
-        )
-        gradient_rtt_ms = rtt_ms - last_rtt_ms
-        jitter_ms = clock_units_to_seconds(rtp_remote_inbound["rb-jitter"], rtp_outbound["clock-rate"]) * 1000
+            # fraction rx rate in Mbits
+            try:
+                bitrate_recv = ice_candidate_pair[0]["bitrate-recv"]
+                rx_rate = bitrate_recv / 1000000
+            except KeyError:
+                rx_bytes_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound[0], "bytes-received")
+                rx_mbits_diff = rx_bytes_diff * 8 / 1000000
+                rx_rate = rx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
 
-        # opened to extensions
-        final_stats = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3],
-            "fraction_packets_lost": rtp_remote_inbound["rb-fractionlost"],
-            "packets_lost": rtp_remote_inbound["rb-packetslost"],
-            "loss_rate_%": loss_rate,
-            "ext_highest_seq": rtp_remote_inbound["rb-exthighestseq"],
-            "rtt_ms": rtt_ms,
-            "gradient_rtt_ms": gradient_rtt_ms,
-            "jitter_ms": jitter_ms,
-            "nack_count": rtp_outbound["recv-nack-count"],
-            "pli_count": rtp_outbound["recv-pli-count"],
-            "rx_packets": rtp_outbound["packets-received"],
-            "rx_mbytes": rtp_outbound["bytes-received"] / 1000000,
-            "tx_rate_mbits": tx_rate,
-            "rx_rate_mbits": rx_rate,
-        }
+            # rtts / jitter
+            rtt_ms = ntp_short_format_to_seconds(rtp_inbound_ssrc["rb-round-trip"]) * 1000
+            last_rtt_ms = (
+                ntp_short_format_to_seconds(last_rtp_inbound[i]["rb-round-trip"]) * 1000
+                if 0 <= i < len(last_rtp_inbound)
+                else 0.0
+            )
+            gradient_rtt_ms = rtt_ms - last_rtt_ms
+            jitter_ms = clock_units_to_seconds(rtp_inbound_ssrc["rb-jitter"], rtp_outbound[0]["clock-rate"]) * 1000
 
-        self.stats.append(final_stats)
+            # opened to extensions
+            final_stats = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3],
+                "ssrc": ssrc,
+                "fraction_packets_lost": rtp_inbound_ssrc["rb-fractionlost"],
+                "packets_lost": rtp_inbound_ssrc["rb-packetslost"],
+                "loss_rate_%": loss_rate,
+                "ext_highest_seq": rtp_inbound_ssrc["rb-exthighestseq"],
+                "rtt_ms": rtt_ms,
+                "gradient_rtt_ms": gradient_rtt_ms,
+                "jitter_ms": jitter_ms,
+                "nack_count": rtp_outbound[0]["recv-nack-count"],
+                "pli_count": rtp_outbound[0]["recv-pli-count"],
+                "rx_packets": rtp_outbound[0]["packets-received"],
+                "rx_mbytes": rtp_outbound[0]["bytes-received"] / 1000000,
+                "tx_rate_mbits": tx_rate,
+                "rx_rate_mbits": rx_rate,
+            }
+            self.stats.append(final_stats)
+
         self.last_stats = gst_stats
         return True
 
@@ -149,7 +167,9 @@ class CsvViewerRecorderAgent(Agent):
                 self.csv_writer.writeheader()
             self.csv_handler.flush()
         else:
-            self.csv_writer.writerow(self.stats[-1])
+            for stat in self.stats:
+                self.csv_writer.writerow(stat)
+            self.stats = []
 
     def stop(self) -> None:
         LOGGER.info("INFO: stopping Csv Viewer Recorder agent...")

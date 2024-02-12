@@ -82,7 +82,7 @@ class DrlEnv(Env):
             self.controller.observation_queue.empty()
             and time.time() - start_fetch_time < self.state_update_interval * 2
         ):
-            time.sleep(0.1)
+            time.sleep(self.state_update_interval)
             if self.is_finished:
                 # this could be triggered e.g., by agent.stop() call or by DrlBreakCallback
                 LOGGER.info("WARNING: Interrupted by a finish signal, closing the env...")
@@ -107,7 +107,6 @@ class DrlEnv(Env):
                     self.reward = 0.0
                     return None
                 else:
-                    LOGGER.warning("WARNING: No stats were pulled from the observation queue, waiting...")
                     continue
             else:
                 is_obs = self.mdp.check_observation(stats)

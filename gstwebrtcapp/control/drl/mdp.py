@@ -5,6 +5,7 @@ import numpy as np
 from typing import Any, Dict, OrderedDict, Tuple
 
 from control.drl.reward import RewardFunctionFactory
+from utils.base import LOGGER
 from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
@@ -49,6 +50,7 @@ class MDP(metaclass=ABCMeta):
     @abstractmethod
     def reset(self):
         # memento pattern
+        self.first_ssrc = None
         self.states_made = 0
         self.last_stats = None
         self.last_states = collections.deque(maxlen=self.state_history_size + 1)
@@ -95,7 +97,7 @@ class MDP(metaclass=ABCMeta):
     def check_observation(self, obs: Dict[str, Any]) -> bool:
         if self.obs_filter is not None:
             for stat in self.obs_filter:
-                if find_stat(obs, stat) is None:
+                if not find_stat(obs, stat):
                     return False
         return True
 
@@ -126,7 +128,8 @@ class ViewerMDP(MDP):
         # filter obs only with needed stats in
         self.obs_filter = [
             GstWebRTCStatsType.RTP_OUTBOUND_STREAM,
-            GstWebRTCStatsType.RTP_REMOTE_INBOUND_STREAM,
+            GstWebRTCStatsType.RTP_INBOUND_STREAM,
+            GstWebRTCStatsType.ICE_CANDIDATE_PAIR,
         ]
 
         self.reset()
@@ -177,100 +180,115 @@ class ViewerMDP(MDP):
 
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
-        rtp_remote_inbound_stream = find_stat(stats, GstWebRTCStatsType.RTP_REMOTE_INBOUND_STREAM)
-        if rtp_outbound is None or rtp_remote_inbound_stream is None:
+        rtp_inbound = find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
+        ice_candidate_pair = find_stat(stats, GstWebRTCStatsType.ICE_CANDIDATE_PAIR)
+        if not rtp_outbound or not rtp_inbound or not ice_candidate_pair:
             return self.make_default_state()
 
         # get previous state for calculating fractional values
         last_rtp_outbound = (
             find_stat(self.last_stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM) if self.last_stats is not None else None
         )
-        last_rtp_remote_inbound_stream = (
-            find_stat(self.last_stats, GstWebRTCStatsType.RTP_REMOTE_INBOUND_STREAM)
-            if self.last_stats is not None
-            else None
+        last_rtp_inbound = (
+            find_stat(self.last_stats, GstWebRTCStatsType.RTP_INBOUND_STREAM) if self.last_stats is not None else None
         )
-
-        # get needed stats
-        packets_sent_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "packets-sent")
-        packets_recv_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "packets-received")
-        ts_diff_sec = get_stat_diff(rtp_outbound, last_rtp_outbound, "timestamp") / 1000
-
-        # loss rates
-        # 1. fraction loss rate
-        rb_packetslost_diff = get_stat_diff(rtp_remote_inbound_stream, last_rtp_remote_inbound_stream, "rb-packetslost")
-        fraction_loss_rate = rb_packetslost_diff / packets_sent_diff if packets_sent_diff > 0 else 0
-        # 7. global loss rate
-        loss_rate = (
-            rtp_remote_inbound_stream["rb-packetslost"] / rtp_outbound["packets-sent"]
-            if rtp_outbound["packets-sent"] > 0
-            else 0
-        )
-
-        # 2. fraction nack rate
-        recv_nack_count_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "nack-count")
-        fraction_nack_rate = recv_nack_count_diff / packets_recv_diff if packets_recv_diff > 0 else 0
-
-        # 3. fraction pli rate
-        recv_pli_count_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "pli-count")
-        fraction_pli_rate = recv_pli_count_diff / packets_recv_diff if packets_recv_diff > 0 else 0
-
-        # rtts: RTT comes in NTP short format
-        rtt = ntp_short_format_to_seconds(rtp_remote_inbound_stream["rb-round-trip"]) / self.MAX_DELAY_SEC
-        self.rtts.append(rtt)
-
-        # 4. fraction queueing rtt
-        fraction_queueing_rtt = rtt - min(self.rtts) if len(self.rtts) > 0 else 0.0
-        # 5. gradient rtt
-        gradient_rtt = (
-            rtt - (ntp_short_format_to_seconds(last_rtp_remote_inbound_stream["rb-round-trip"]) / self.MAX_DELAY_SEC)
-            if last_rtp_remote_inbound_stream is not None
-            else 0.0
-        )
-        # 9. mean rtt
-        rtt_mean = np.mean(self.rtts) if len(self.rtts) > 0 else 0.0
-        # 10. std rtt
-        rtt_std = np.std(self.rtts) if len(self.rtts) > 0 else 0.0
-
-        # 6. jitter: comes in clock units
-        interarrival_jitter = (
-            clock_units_to_seconds(rtp_remote_inbound_stream["rb-jitter"], rtp_outbound["clock-rate"])
-            / self.MAX_DELAY_SEC
-        )
-
-        # 11. rx rate
-        rx_bytes_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "bytes-received")
-        rx_mbits_diff = rx_bytes_diff * 8 / 1000000
-        rx_rate = rx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
-
-        # 12. tx rate
-        bitrate = rtp_outbound["bitrate"]
-        if bitrate != 0:
-            tx_rate = rtp_outbound["bitrate"] / 1000000 / self.MAX_BITRATE_STREAM_MBPS
-        else:
-            tx_bytes_diff = get_stat_diff(rtp_outbound, last_rtp_outbound, "bytes-sent")
-            tx_mbits_diff = tx_bytes_diff * 8 / 1000000
-            tx_rate = tx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
-
-        # form the final state
-        state = collections.OrderedDict({
-            "fractionLossRate": fraction_loss_rate,
-            "fractionNackRate": fraction_nack_rate,
-            "fractionPliRate": fraction_pli_rate,
-            "fractionQueueingRtt": fraction_queueing_rtt,
-            "fractionRtt": rtt,
-            "gradientRtt": gradient_rtt,
-            "interarrivalJitter": interarrival_jitter,
-            "lossRate": loss_rate,
-            "rttMean": rtt_mean,
-            "rttStd": rtt_std,
-            "rxRate": rx_rate,
-            "txRate": tx_rate,
-        })
-
         self.last_stats = stats
-        self.last_states.append(state)
-        return state
+
+        if self.first_ssrc is None:
+            # FIXME: make first ever ssrc to be the privileged one and take stats only from it
+            self.first_ssrc = rtp_inbound[0]["ssrc"]
+
+        for i, rtp_inbound_ssrc in enumerate(rtp_inbound):
+            if rtp_inbound_ssrc["ssrc"] == self.first_ssrc:
+                last_rtp_inbound_ssrc = last_rtp_inbound[i] if last_rtp_inbound is not None else None
+                last_rtp_outbound_ssrc = last_rtp_outbound[0] if last_rtp_outbound is not None else None
+
+                # get needed stats
+                packets_sent_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "packets-sent")
+                packets_recv_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "packets-received")
+                ts_diff_sec = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "timestamp") / 1000
+
+                # loss rates
+                # 1. fraction loss rate
+                rb_packetslost_diff = get_stat_diff(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
+                fraction_loss_rate = rb_packetslost_diff / packets_sent_diff if packets_sent_diff > 0 else 0
+                # 7. global loss rate
+                loss_rate = (
+                    rtp_inbound[i]["rb-packetslost"] / rtp_outbound[0]["packets-sent"]
+                    if rtp_outbound[0]["packets-sent"] > 0
+                    else 0.0
+                )
+
+                # 2. fraction nack rate
+                recv_nack_count_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "nack-count")
+                fraction_nack_rate = recv_nack_count_diff / packets_recv_diff if packets_recv_diff > 0 else 0.0
+
+                # 3. fraction pli rate
+                recv_pli_count_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "pli-count")
+                fraction_pli_rate = recv_pli_count_diff / packets_recv_diff if packets_recv_diff > 0 else 0.0
+
+                # rtts: RTT comes in NTP short format
+                rtt = ntp_short_format_to_seconds(rtp_inbound[i]["rb-round-trip"]) / self.MAX_DELAY_SEC
+                self.rtts.append(rtt)
+
+                # 4. fraction queueing rtt
+                fraction_queueing_rtt = rtt - min(self.rtts) if len(self.rtts) > 0 else 0.0
+                # 5. gradient rtt
+                gradient_rtt = (
+                    rtt - (ntp_short_format_to_seconds(last_rtp_inbound_ssrc["rb-round-trip"]) / self.MAX_DELAY_SEC)
+                    if last_rtp_inbound_ssrc is not None
+                    else 0.0
+                )
+                # 9. mean rtt
+                rtt_mean = np.mean(self.rtts) if len(self.rtts) > 0 else 0.0
+                # 10. std rtt
+                rtt_std = np.std(self.rtts) if len(self.rtts) > 0 else 0.0
+
+                # 6. jitter: comes in clock units
+                interarrival_jitter = (
+                    clock_units_to_seconds(rtp_inbound[i]["rb-jitter"], rtp_outbound[0]["clock-rate"])
+                    / self.MAX_DELAY_SEC
+                )
+
+                # 11. rx rate
+                try:
+                    bitrate_recv = ice_candidate_pair[0]["bitrate-recv"]
+                    rx_rate = bitrate_recv / 1000000 / self.MAX_BITRATE_STREAM_MBPS
+                except KeyError:
+                    rx_bytes_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-received")
+                    rx_mbits_diff = rx_bytes_diff * 8 / 1000000
+                    rx_rate = rx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
+
+                # 12. tx rate
+                try:
+                    bitrate_sent = ice_candidate_pair[0]["bitrate-sent"]
+                    tx_rate = bitrate_sent / 1000000 / self.MAX_BITRATE_STREAM_MBPS
+                except KeyError:
+                    tx_bytes_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-sent")
+                    tx_mbits_diff = tx_bytes_diff * 8 / 1000000
+                    tx_rate = tx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
+
+                # form the final state
+                state = collections.OrderedDict({
+                    "fractionLossRate": fraction_loss_rate,
+                    "fractionNackRate": fraction_nack_rate,
+                    "fractionPliRate": fraction_pli_rate,
+                    "fractionQueueingRtt": fraction_queueing_rtt,
+                    "fractionRtt": rtt,
+                    "gradientRtt": gradient_rtt,
+                    "interarrivalJitter": interarrival_jitter,
+                    "lossRate": loss_rate,
+                    "rttMean": rtt_mean,
+                    "rttStd": rtt_std,
+                    "rxRate": rx_rate,
+                    "txRate": tx_rate,
+                })
+
+                self.last_states.append(state)
+                return state
+
+        LOGGER.warning("WARNING: Drl Agent: ViewerMDP: make_state: no ssrc stats found")
+        return self.make_default_state()
 
     def convert_to_unscaled_state(self, state: OrderedDict[str, Any]) -> OrderedDict[str, Any]:
         return (
