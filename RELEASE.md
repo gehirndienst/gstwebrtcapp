@@ -18,9 +18,14 @@
 * Fully isolated Docker environment with CUDA, with a built-in VPN support via openconnect and with tcconfig to tweak the network. Check `docker` folder for the corresponding Dockerfiles.
 * Support GStreamer NVENC encoders for CUDA containers (h264, h265, vp8, vp9, av1). Currently no support for VAAPI or Jetson Gstreamer plugins.
 
-## Version 1.1.0 (2024-02-16)
+## Version 1.1.0 (2024-02-06)
 
 ### Features
 * New sink application introduced in the `apps/sinkapp` submodule. It allows to stream via high-level webrtcsink rs plugin to the JS client.
 * New recorder agent introduced in the `control/recorder` submodule. It saves webrtc stats to the CSV file.
 * Refactoring and re-structuring of the codebase. Improving the docker environment. Extended examples for ahoy/sink apps, hardware accelerated encoders, control API, recorder and the full DRL agent.
+
+## Version 1.1.1 (2024-02-12)
+* Added a bandwidth estimation element using the Google Congestion Control algorithm. The estimates are so far collected within a deque in the app class.
+* `DrlAgent` and `CsvViewerRecorderAgent` now handle RTCP feedback for each SSRC (viewer) independently.
+* Added many new pipelines for all supported encoders.
