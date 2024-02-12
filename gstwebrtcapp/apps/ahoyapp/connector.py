@@ -177,9 +177,6 @@ class AhoyConnector:
                         f"INFO: on_message, succesfully created local answer for webrtcbin on incoming SDP request..."
                     )
 
-                    # force goog-remb to be added to the answer
-                    self.webrtcbin_sdp.add_attribute('rtcp-fb', f'{self.payload_type} goog-remb')
-
                     candidates = msg["sdpRequest"]["candidates"]
                     for candidate in candidates:
                         LOGGER.info(f"INFO: on_message, adding ice candidate ... {candidate['candidate']}")

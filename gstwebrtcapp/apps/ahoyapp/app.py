@@ -12,12 +12,17 @@ License:
 
 """
 
+from collections import deque
+from datetime import datetime
 from typing import List
+import warnings
 import gi
 
 gi.require_version("Gst", "1.0")
+gi.require_version('GstRtp', '1.0')
 gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
+from gi.repository import GstRtp
 from gi.repository import GstWebRTC
 
 from apps.app import GstWebRTCApp, GstWebRTCAppConfig
@@ -42,6 +47,8 @@ class AhoyApp(GstWebRTCApp):
         self.encoder = None
         self.pay_capsfilter = None
         self.transceivers = []
+        self.gcc = None
+        self.gcc_estimated_bitrates = deque(maxlen=1000)
         self.bus = None
 
         super().__init__(config)
@@ -61,12 +68,8 @@ class AhoyApp(GstWebRTCApp):
         else:
             raise GSTWEBRTCAPP_EXCEPTION("can't find webrtcbin in the pipeline")
 
-        # elems
+        # collect main named elems
         self.source = self.pipeline.get_by_name("source")
-        if self.source.get_property("location") is not None:
-            # NOTE: only sources with location property are supported (Gst plugins of *src group)
-            self.source.set_property("location", self.video_url)
-            LOGGER.info(f"OK: video location is set to {self.video_url}")
         self.raw_capsfilter = self.pipeline.get_by_name("raw_capsfilter")
         self.encoder = self.pipeline.get_by_name("encoder")
         self.payloader = self.pipeline.get_by_name("payloader")
@@ -80,8 +83,23 @@ class AhoyApp(GstWebRTCApp):
         ):
             raise GSTWEBRTCAPP_EXCEPTION("can't find needed elements in the pipeline")
 
+        # set video source location
+        if self.source.get_property("location") is not None:
+            # NOTE: only sources with location property are supported now (Gst plugins of *src group)
+            self.source.set_property("location", self.video_url)
+            LOGGER.info(f"OK: video location is set to {self.video_url}")
+
+        # set gcc estimator if settings are provided
+        if self.gcc_settings is not None:
+            self.set_gcc()
+
+        # get webrtcbin transceivers
         self.get_transceivers()
 
+        # set priority (DSCP marking)
+        self.set_priority()
+
+        # set resolution, framerate, bitrate and fec percentage
         self.set_resolution(self.resolution["width"], self.resolution["height"])
         self.set_framerate(self.framerate)
         self.set_bitrate(self.bitrate)
@@ -100,7 +118,22 @@ class AhoyApp(GstWebRTCApp):
     def _post_init_pipeline(self) -> None:
         pass
 
+    def set_gcc(self) -> None:
+        # add rtpgccbwe element and enable twcc RTP extension for the payloader
+        self.gcc = Gst.ElementFactory.make("rtpgccbwe")
+        if not self.gcc:
+            raise GSTWEBRTCAPP_EXCEPTION("Can't create rtpgccbwe")
+        twcc_ext = GstRtp.RTPHeaderExtension.create_from_uri(
+            "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+        )
+        twcc_ext.set_id(1)
+        self.payloader.emit("add-extension", twcc_ext)
+        self.webrtcbin.connect("request-aux-sender", self._cb_add_gcc)
+        self.webrtcbin.connect('deep-element-added', lambda _, __, ___: None)
+        LOGGER.info("OK: gcc is set")
+
     def get_transceivers(self) -> List[GstWebRTC.WebRTCRTPTransceiver]:
+        # get transceivers from webrtcbin and set NACK and FEC properties
         if len(self.transceivers) > 0:
             return self.transceivers
         else:
@@ -122,6 +155,27 @@ class AhoyApp(GstWebRTCApp):
                 else:
                     raise GSTWEBRTCAPP_EXCEPTION("can't get any single transceiver from webrtcbin")
             return self.transceivers
+
+    def set_priority(self) -> None:
+        # set priority to the sender. Corresponds to 8, 0, 36, 38 DSCP values.
+        match self.priority:
+            case 1:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.VERY_LOW
+            case 2:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.LOW
+            case 3:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.MEDIUM
+            case 4:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.HIGH
+            case _:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.LOW
+        sender = self.transceivers[0].get_property("sender")
+        if sender is not None:
+            # NOTE: it produces a warning but it is a buggy introspection of a C assertion, so it's safe to ignore
+            sender.set_property("priority", wrtc_priority_type)
+            LOGGER.info(f"OK: set priority (DSCP marking) to {self.priority}, min 1, max 4")
+        else:
+            raise GSTWEBRTCAPP_EXCEPTION("can't set priority, sender is None")
 
     def get_raw_caps(self) -> Gst.Caps:
         raw = 'video/x-raw' if not self.is_cuda else 'video/x-raw(memory:CUDAMemory)'
@@ -168,3 +222,18 @@ class AhoyApp(GstWebRTCApp):
 
         self.fec_percentage = percentage
         LOGGER.info(f"ACTION: set fec percentage to {percentage}")
+
+    def _cb_add_gcc(self, _, __) -> Gst.Element:
+        self.gcc.set_property("min-bitrate", 100000)
+        self.gcc.set_property("max-bitrate", 20000000)
+        self.gcc.set_property("estimated-bitrate", self.bitrate * 1000)
+        self.gcc.connect("notify::estimated-bitrate", self._on_estimated_bitrate_changed)
+        return self.gcc
+
+    def _on_estimated_bitrate_changed(self, bwe, pspec) -> None:
+        if bwe and pspec.name == "estimated-bitrate":
+            estimated_bitrate = self.gcc.get_property(pspec.name)
+            time_now = datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3]
+            self.gcc_estimated_bitrates.append((time_now, estimated_bitrate))
+        else:
+            raise GSTWEBRTCAPP_EXCEPTION("Can't get estimated bitrate by gcc")
