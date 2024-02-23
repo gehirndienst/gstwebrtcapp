@@ -210,7 +210,7 @@ class GstWebRTCApp(metaclass=ABCMeta):
         try:
             while True:
                 message = self.bus.timed_pop_filtered(
-                    0.5 * Gst.SECOND,
+                    0.1 * Gst.SECOND,
                     Gst.MessageType.APPLICATION
                     | Gst.MessageType.EOS
                     | Gst.MessageType.ERROR

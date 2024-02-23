@@ -226,11 +226,19 @@ class AhoyApp(GstWebRTCApp):
     def set_encoder_param(self, param: str, value: Any) -> None:
         prop = self.encoder.get_property(param)
         if prop is not None:
-            self.source.set_state(Gst.State.PAUSED)
-            self.encoder.set_state(Gst.State.READY)
+            r = self.source.set_state(Gst.State.PAUSED)
+            if r != Gst.StateChangeReturn.SUCCESS:
+                raise GSTWEBRTCAPP_EXCEPTION("set_encoder_param: unable to set the source to the paused state")
+            r = self.encoder.set_state(Gst.State.READY)
+            if r != Gst.StateChangeReturn.SUCCESS:
+                raise GSTWEBRTCAPP_EXCEPTION("set_encoder_param: unable to set the encoder to the ready state")
             self.encoder.set_property(param, value)
-            self.encoder.set_state(Gst.State.PLAYING)
-            self.source.set_state(Gst.State.PLAYING)
+            r = self.source.set_state(Gst.State.PLAYING)
+            if r != Gst.StateChangeReturn.SUCCESS:
+                raise GSTWEBRTCAPP_EXCEPTION("set_encoder_param: unable to set the source to the playing state")
+            r = self.encoder.set_state(Gst.State.PLAYING)
+            if r != Gst.StateChangeReturn.SUCCESS:
+                raise GSTWEBRTCAPP_EXCEPTION("set_encoder_param: unable to set the encoder to the playing state")
             LOGGER.info(f"ACTION: set encoder param {param} from {prop} to {self.encoder.get_property(param)}")
         else:
             raise GSTWEBRTCAPP_EXCEPTION(f"Encoder {self.encoder} doesn't have property {param}")
