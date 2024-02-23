@@ -14,7 +14,7 @@ License:
 
 from collections import deque
 from datetime import datetime
-from typing import List
+from typing import Any, List
 import gi
 
 gi.require_version("Gst", "1.0")
@@ -222,6 +222,18 @@ class AhoyApp(GstWebRTCApp):
 
         self.fec_percentage = percentage
         LOGGER.info(f"ACTION: set fec percentage to {percentage}")
+
+    def set_encoder_param(self, param: str, value: Any) -> None:
+        prop = self.encoder.get_property(param)
+        if prop is not None:
+            self.source.set_state(Gst.State.PAUSED)
+            self.encoder.set_state(Gst.State.READY)
+            self.encoder.set_property(param, value)
+            self.encoder.set_state(Gst.State.PLAYING)
+            self.source.set_state(Gst.State.PLAYING)
+            LOGGER.info(f"ACTION: set encoder param {param} from {prop} to {self.encoder.get_property(param)}")
+        else:
+            raise GSTWEBRTCAPP_EXCEPTION(f"Encoder {self.encoder} doesn't have property {param}")
 
     def _cb_add_gcc(self, _, __) -> Gst.Element:
         min_bitrate = (
