@@ -17,12 +17,14 @@ import re
 import threading
 import gi
 
+
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
 
 from apps.app import GstWebRTCAppConfig
 from apps.sinkapp.app import SinkApp
 from control.agent import Agent
+from network.controller import NetworkController
 from utils.base import LOGGER, async_wait_for_condition
 from utils.gst import stats_to_dict
 
@@ -34,6 +36,7 @@ class SinkConnector:
         pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
         agent: Agent | None = None,
         stats_update_interval: float = 1.0,
+        network_controller: NetworkController | None = None,
     ):
         self.pipeline_config = pipeline_config
         if 'signaller::uri' in self.pipeline_config.pipeline_str:
@@ -48,6 +51,7 @@ class SinkConnector:
         self.agent = agent
         self.agent_thread = None
         self.stats_update_interval = stats_update_interval
+        self.network_controller = network_controller
 
         self._app = None
         self.webrtcbin_stats = deque(maxlen=10000)
@@ -79,6 +83,10 @@ class SinkConnector:
                 self.agent_thread = threading.Thread(target=self.agent.run, args=(True,), daemon=True)
                 self.agent_thread.start()
                 tasks.append(controller_task)
+            if self.network_controller is not None:
+                # start network controller's task
+                network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
+                tasks.append(network_controller_task)
             #######################################################################################
             await asyncio.gather(*tasks)
 

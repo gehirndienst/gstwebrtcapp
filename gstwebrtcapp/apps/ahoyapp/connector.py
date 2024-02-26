@@ -31,6 +31,7 @@ from gi.repository import GstWebRTC
 from apps.app import GstWebRTCAppConfig
 from apps.ahoyapp.app import AhoyApp
 from control.agent import Agent
+from network.controller import NetworkController
 from utils.base import LOGGER, wait_for_condition, async_wait_for_condition
 from utils.gst import stats_to_dict
 
@@ -59,6 +60,7 @@ class AhoyConnector:
         signalling_channel_name: str = "control",
         stats_channel_name: str = "telemetry",
         stats_update_interval: float = 1.0,
+        network_controller: NetworkController | None = None,
     ):
         self.server = server
         self.api_key = api_key
@@ -82,6 +84,7 @@ class AhoyConnector:
         self.ahoy_stats = deque(maxlen=10000)
         self.webrtcbin_stats = deque(maxlen=10000)
         self.stats_update_interval = stats_update_interval
+        self.network_controller = network_controller
 
         self.is_running = False
         self.is_locked = True
@@ -371,6 +374,10 @@ class AhoyConnector:
                 self.agent_thread = threading.Thread(target=self.agent.run, args=(True,), daemon=True)
                 self.agent_thread.start()
                 tasks.append(controller_task)
+            if self.network_controller is not None:
+                # start network controller's task
+                network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
+                tasks.append(network_controller_task)
             #######################################################################################
             self.webrtc_coro_control_task = asyncio.create_task(asyncio.sleep(float('inf')))
             tasks = [self.webrtc_coro_control_task, *tasks]
