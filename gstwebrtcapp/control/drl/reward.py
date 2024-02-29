@@ -155,13 +155,13 @@ class QoeAhoy(RewardFunction):
         # 2. if rtt > 300ms then reward = 0
         # 3. if rxRate / txRate < 0.2 then reward = 0
         # 4. if jitter > 250ms then reward = 0
-        # 5. if plir > 0.8% then reward = 0
+        # 5. if plir > 1% then reward = 0
         if (
             self.state["fractionLossRate"] > 0.2
             or self.state["fractionRtt"] > 0.3
             or (self.state["txGoodput"] > 0 and self.state["rxGoodput"] / self.state["txGoodput"] < 0.2)
             or self.state["interarrivalRttJitter"] > 0.25
-            or self.state["fractionPliRate"] > 0.001
+            or self.state["fractionPliRate"] > 0.01
         ):
             reward = 0.0
 

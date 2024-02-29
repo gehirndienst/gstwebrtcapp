@@ -17,11 +17,13 @@ class MDP(metaclass=ABCMeta):
     that could be directly applied to the GStreamer pipeline and vice versa.
     '''
 
-    MAX_BITRATE_STREAM_MBPS = 15  # so far for 1 stream only, later we can have multiple streams
+    MAX_BITRATE_STREAM_MBPS = 10  # so far for 1 stream only, later we can have multiple streams
+    MIN_BITRATE_STREAM_MBPS = 0.4  # so far for 1 stream only, later we can have multiple streams
     MAX_DELAY_SEC = 1  # assume we target the sub-second latency
 
     CONSTANTS = {
         "MAX_BITRATE_STREAM_MBPS": MAX_BITRATE_STREAM_MBPS,
+        "MIN_BITRATE_STREAM_MBPS": MIN_BITRATE_STREAM_MBPS,
         "MAX_DELAY_SEC": MAX_DELAY_SEC,
     }
 
@@ -212,8 +214,9 @@ class ViewerMDP(MDP):
 
                 # loss rates
                 # 1. fraction loss rate
-                rb_packetslost_diff = min(0, get_stat_diff(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost"))
+                rb_packetslost_diff = get_stat_diff(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
                 fraction_loss_rate = rb_packetslost_diff / packets_sent_diff if packets_sent_diff > 0 else 0
+                fraction_loss_rate = max(0, min(1, fraction_loss_rate))
                 # 7. global loss rate
                 loss_rate = (
                     rtp_inbound[i]["rb-packetslost"] / rtp_outbound[0]["packets-sent"]
@@ -309,7 +312,9 @@ class ViewerMDP(MDP):
         )
 
     def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
-        return 0.5 * (action + 1) * self.MAX_BITRATE_STREAM_MBPS if self.is_scaled else action
+        return self.MIN_BITRATE_STREAM_MBPS + (
+            (action + 1) * (self.MAX_BITRATE_STREAM_MBPS - self.MIN_BITRATE_STREAM_MBPS) / 2
+        )
 
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
         # here we have only bitrate decisions that come as a 1-size np array in mbps (check create_action_space)
