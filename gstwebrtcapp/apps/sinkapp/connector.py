@@ -13,6 +13,7 @@ License:
 
 import asyncio
 from collections import deque
+import json
 import re
 import threading
 import gi
@@ -24,6 +25,7 @@ from gi.repository import Gst
 from apps.app import GstWebRTCAppConfig
 from apps.sinkapp.app import SinkApp
 from control.agent import Agent
+from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from network.controller import NetworkController
 from utils.base import LOGGER, async_wait_for_condition
 from utils.gst import stats_to_dict
@@ -36,6 +38,7 @@ class SinkConnector:
         pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
         agent: Agent | None = None,
         stats_update_interval: float = 1.0,
+        mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
     ):
         self.pipeline_config = pipeline_config
@@ -50,6 +53,14 @@ class SinkConnector:
 
         self.agent = agent
         self.agent_thread = None
+        self.mqtt_config = mqtt_config
+        if self.agent is not None:
+            self.agent.mqtt_config = mqtt_config
+        self.mqtts = MqttPair(
+            publisher=MqttPublisher(self.mqtt_config),
+            subscriber=MqttSubscriber(self.mqtt_config),
+        )
+        self.mqtts_threads = None
         self.stats_update_interval = stats_update_interval
         self.network_controller = network_controller
 
@@ -72,17 +83,21 @@ class SinkConnector:
         tasks = []
         try:
             LOGGER.info(f"OK: main webrtc coroutine has been started!")
+            self.mqtts_threads = [
+                threading.Thread(target=self.mqtts.publisher.run, daemon=True).start(),
+                threading.Thread(target=self.mqtts.subscriber.run, daemon=True).start(),
+            ]
+            self.mqtts.subscriber.subscribe([self.mqtt_config.topics.actions])
             ######################################## TASKS ########################################
             pipeline_task = asyncio.create_task(self._app.handle_pipeline())
             post_init_pipeline_task = asyncio.create_task(self.handle_post_init_pipeline())
             webrtcsink_stats_task = asyncio.create_task(self.handle_webrtcsink_stats())
-            tasks = [pipeline_task, post_init_pipeline_task, webrtcsink_stats_task]
+            actions_task = asyncio.create_task(self.handle_actions())
+            tasks = [pipeline_task, post_init_pipeline_task, webrtcsink_stats_task, actions_task]
             if self.agent is not None:
-                # start agent's controller and agent's thread
-                controller_task = asyncio.create_task(self.agent.controller.handle_actions(self._app))
+                # start agents thread
                 self.agent_thread = threading.Thread(target=self.agent.run, args=(True,), daemon=True)
                 self.agent_thread.start()
-                tasks.append(controller_task)
             if self.network_controller is not None:
                 # start network controller's task
                 network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
@@ -97,6 +112,11 @@ class SinkConnector:
             if self.agent_thread is not None:
                 self.agent.stop()
                 self.agent_thread.join()
+            self.mqtts.publisher.stop()
+            self.mqtts.subscriber.stop()
+            for t in self.mqtts_threads:
+                if t:
+                    t.join()
             self._app = None
             LOGGER.error(
                 "ERROR: main webrtc coroutine has been unexpectedly interrupted due to an exception:"
@@ -135,11 +155,32 @@ class SinkConnector:
                             stats[stat_name] = stats_to_dict(stat_value.to_string())
             # push the stats to the agent's controller queue or save it to an own one
             if stats:
-                if self.agent is not None:
-                    self.agent.controller.push_observation(stats)
-                else:
-                    self.webrtcbin_stats.append(stats)
+                self.mqtts.publisher.publish(self.mqtt_config.topics.stats, json.dumps(stats))
+
         LOGGER.info(f"OK: WEBRTCSINK STATS HANDLER IS OFF!")
+
+    async def handle_actions(self) -> None:
+        LOGGER.info(f"OK: ACTIONS HANDLER IS ON -- ready to pick and apply actions")
+        while self.is_running:
+            action_msg = await self.mqtts.subscriber.message_queue.get()
+            msg = json.loads(action_msg.msg)
+            if self._app is not None and len(msg) > 0:
+                for action in msg:
+                    if msg.get(action) is None:
+                        LOGGER.error(f"ERROR: Action {action} has no value!")
+                        continue
+                    else:
+                        match action:
+                            case "bitrate":
+                                # add 10% policy: if bitrate difference is less than 10% then don't change it
+                                if abs(self._app.bitrate - msg[action]) / self._app.bitrate > 0.1:
+                                    self._app.set_bitrate(msg[action])
+                            case "resolution":
+                                self._app.set_resolution(msg[action])
+                            case "framerate":
+                                self._app.set_framerate(msg[action])
+                            case _:
+                                LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
 
     @property
     def app(self) -> SinkApp | None:

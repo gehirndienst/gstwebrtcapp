@@ -6,16 +6,18 @@ Author:
 '''
 
 import asyncio
+import threading
 
 from apps.app import GstWebRTCAppConfig
 from apps.ahoyapp.connector import AhoyConnector
 from apps.pipelines import DEFAULT_BIN_CUDA_PIPELINE, DEFAULT_SINK_PIPELINE
 from apps.sinkapp.connector import SinkConnector
-from control.controller import Controller
 from control.drl.agent import DrlAgent
 from control.drl.config import DrlConfig
 from control.drl.mdp import ViewerMDP
 from control.recorder.agent import CsvViewerRecorderAgent
+from message.broker import MosquittoBroker
+from message.client import MqttConfig
 from network.controller import NetworkController
 from utils.base import LOGGER
 
@@ -52,6 +54,10 @@ async def manipulate_video_coro(conn: AhoyConnector):
 async def test_manipulate_video():
     # run it to test video manipulation.
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         conn = AhoyConnector(
@@ -67,6 +73,9 @@ async def test_manipulate_video():
         pipeline_task = asyncio.create_task(manipulate_video_coro(conn))
         await asyncio.gather(conn_task, pipeline_task)
 
+        broker.stop()
+        broker_thread.join()
+
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")
         return
@@ -75,6 +84,10 @@ async def test_manipulate_video():
 async def test_nvenc():
     # run it to test nvenc hardware acceleration.
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         cfg = GstWebRTCAppConfig(
             video_url="VIDEO_SOURCE",
             pipeline_str=DEFAULT_BIN_CUDA_PIPELINE,
@@ -89,8 +102,10 @@ async def test_nvenc():
         )
 
         await conn.connect_coro()
-
         await conn.webrtc_coro()
+
+        broker.stop()
+        broker_thread.join()
 
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")
@@ -100,12 +115,16 @@ async def test_nvenc():
 async def test_csv_recorder():
     # run it to test csv viewer recorder agent
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         stats_update_interval = 1.0
 
         agent = CsvViewerRecorderAgent(
-            controller=Controller(),
+            mqtt_config=MqttConfig(),
             stats_update_interval=stats_update_interval,
             warmup=10.0,
             log_path="./logs",
@@ -124,6 +143,9 @@ async def test_csv_recorder():
         await conn.connect_coro()
         await conn.webrtc_coro()
 
+        broker.stop()
+        broker_thread.join()
+
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")
         return
@@ -132,6 +154,10 @@ async def test_csv_recorder():
 async def test_drl():
     # run it to test drl agent
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         episodes = 10
         episode_length = 50
         stats_update_interval = 3.0
@@ -139,7 +165,7 @@ async def test_drl():
         app_cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         agent = DrlAgent(
-            config=DrlConfig(
+            drl_config=DrlConfig(
                 mode="train",
                 model_name="sac",
                 episodes=episodes,
@@ -156,12 +182,12 @@ async def test_drl():
                 save_log_path="./logs",
                 verbose=2,
             ),
-            controller=Controller(),
             mdp=ViewerMDP(
                 reward_function_name="qoe_ahoy",
                 episode_length=episode_length,
                 constants={"MAX_BITRATE_STREAM_MBPS": 6},  # Ahoy fixes the max bitrate to 6 Mbps in SDP
             ),
+            mqtt_config=MqttConfig(),
         )
 
         conn = AhoyConnector(
@@ -176,6 +202,9 @@ async def test_drl():
         await conn.connect_coro()
         await conn.webrtc_coro()
 
+        broker.stop()
+        broker_thread.join()
+
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")
         return
@@ -183,6 +212,10 @@ async def test_drl():
 
 async def test_drl_eval():
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         episodes = 5
         episode_length = 512
         stats_update_interval = 3.0
@@ -191,7 +224,7 @@ async def test_drl_eval():
 
         drl_cfg = DrlConfig(
             mode="eval",
-            model_file="model.zip",
+            model_file="med.zip",
             model_name="sac",
             episodes=episodes,
             episode_length=episode_length,
@@ -200,26 +233,28 @@ async def test_drl_eval():
         )
 
         agent = DrlAgent(
-            config=drl_cfg,
-            controller=Controller(),
+            drl_config=drl_cfg,
             mdp=ViewerMDP(
                 reward_function_name="qoe_ahoy",
                 episode_length=episode_length,
                 constants={"MAX_BITRATE_STREAM_MBPS": 6},
             ),
+            mqtt_config=MqttConfig(),
         )
 
         conn = AhoyConnector(
             pipeline_config=app_cfg,
-            agent=agent,
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
-            feed_name="drl_test_eval",
-            stats_update_interval=stats_update_interval,
+            feed_name="test_drl_eval",
+            stats_update_interval=1.0,
         )
 
         await conn.connect_coro()
         await conn.webrtc_coro()
+
+        broker.stop()
+        broker_thread.join()
 
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")
@@ -228,6 +263,10 @@ async def test_drl_eval():
 
 async def test_network_controller():
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         network_controller = NetworkController(gt_bandwidth=10.0, interval=10.0)
@@ -245,6 +284,9 @@ async def test_network_controller():
         await conn.connect_coro()
         await conn.webrtc_coro()
 
+        broker.stop()
+        broker_thread.join()
+
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")
         return
@@ -254,6 +296,10 @@ async def test_sink_app():
     # run to test sink app. NOTE: you need to have a running signalling server and JS client to test this.
     # Check: https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs/-/tree/main/net/webrtc?ref_type=heads#usage
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         cfg = GstWebRTCAppConfig(
             pipeline_str=DEFAULT_SINK_PIPELINE,
             bitrate=6000,
@@ -266,6 +312,9 @@ async def test_sink_app():
 
         await conn.webrtc_coro()
 
+        broker.stop()
+        broker_thread.join()
+
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")
         return
@@ -273,6 +322,10 @@ async def test_sink_app():
 
 async def default():
     try:
+        broker = MosquittoBroker()
+        broker_thread = threading.Thread(target=broker.run, daemon=True)
+        broker_thread.start()
+
         cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         conn = AhoyConnector(
@@ -284,6 +337,9 @@ async def default():
         await conn.connect_coro()
 
         await conn.webrtc_coro()
+
+        broker.stop()
+        broker_thread.join()
 
     except KeyboardInterrupt:
         LOGGER.info("KeyboardInterrupt received, exiting...")

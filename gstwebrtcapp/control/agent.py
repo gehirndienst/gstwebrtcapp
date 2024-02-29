@@ -12,10 +12,11 @@ License:
 
 """
 
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta
 from enum import Enum
+import threading
 
-from control.controller import Controller
+from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 
 
 class AgentType(Enum):
@@ -26,15 +27,28 @@ class AgentType(Enum):
 
 
 class Agent(metaclass=ABCMeta):
-    def __init__(self, controller: Controller) -> None:
-        assert controller is not None, "Agent must have a controller!"
-        self.controller = controller
+    def __init__(
+        self,
+        mqtt_config: MqttConfig,
+    ) -> None:
+        self.mqtt_config = mqtt_config
+        self.mqtts = MqttPair(
+            publisher=MqttPublisher(self.mqtt_config),
+            subscriber=MqttSubscriber(self.mqtt_config),
+        )
+        self.mqtts_threads = [
+            threading.Thread(target=self.mqtts.publisher.run, daemon=True).start(),
+            threading.Thread(target=self.mqtts.subscriber.run, daemon=True).start(),
+        ]
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])
         self.type = AgentType.ABSTRACT
 
-    @abstractmethod
     def run(self, *args, **kwargs) -> None:
         pass
 
-    @abstractmethod
     def stop(self) -> None:
-        pass
+        self.mqtts.publisher.stop()
+        self.mqtts.subscriber.stop()
+        for t in self.mqtts_threads:
+            if t:
+                t.join()

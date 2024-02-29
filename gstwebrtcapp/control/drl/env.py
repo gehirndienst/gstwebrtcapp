@@ -1,27 +1,30 @@
 import collections
+import json
 from gymnasium.core import Env
 from gymnasium.spaces import Box, MultiDiscrete
 import numpy as np
 import time
 from typing import Any, Dict, List, Optional, OrderedDict
 
-from control.controller import Controller
 from control.drl.mdp import MDP
+from message.client import MqttPair
 from utils.base import LOGGER
 
 
 class DrlEnv(Env):
     def __init__(
         self,
-        controller: Controller,
         mdp: MDP,
+        mqtts: MqttPair,
         max_episodes: int = -1,
         state_update_interval: float = 1.0,
+        max_inactivity_time: float = 60.0,
     ):
-        self.controller = controller
         self.mdp = mdp
+        self.mqtts = mqtts
         self.max_episodes = max_episodes
         self.state_update_interval = state_update_interval
+        self.max_inactivity_time = max_inactivity_time
 
         self.episodes = 1
         self.steps = 0
@@ -37,7 +40,10 @@ class DrlEnv(Env):
     def step(self, action):
         self.steps += 1
         self.last_action = action
-        self.controller.push_action(self.mdp.pack_action_for_controller(action))
+        self.mqtts.publisher.publish(
+            self.mqtts.subscriber.topics.actions,
+            json.dumps(action.tolist()) if isinstance(action, np.ndarray) else json.dumps(action),
+        )
 
         # get observation (webrtc stats) from the controller
         stats = self._get_observation()
@@ -79,7 +85,7 @@ class DrlEnv(Env):
     def _get_observation(self) -> Optional[Dict[str, Any]]:
         start_fetch_time = time.time()
         while (
-            self.controller.observation_queue.empty()
+            self.mqtts.subscriber.message_queue.empty()
             and time.time() - start_fetch_time < self.state_update_interval * 2
         ):
             time.sleep(self.state_update_interval)
@@ -93,14 +99,14 @@ class DrlEnv(Env):
         is_obs = False
         time_inactivity_starts = time.time()
         while not is_obs:
-            stats = self.controller.get_observation()
+            stats = json.loads(self.mqtts.subscriber.get_message().msg)
             if stats is None:
                 # this could be triggered if you pulled all queue elements
-                # but none of them passed the check after max timeout defined in controller
-                if time.time() - time_inactivity_starts > self.controller.max_inactivity_time:
+                # but none of them passed the check after max timeout
+                if time.time() - time_inactivity_starts > self.max_inactivity_time:
                     LOGGER.warning(
                         "WARNING: No stats were pulled from the observation queue after"
-                        f" {self.controller.max_inactivity_time} sec, closing the env..."
+                        f" {self.max_inactivity_time} sec, closing the env..."
                     )
                     self.is_finished = True
                     self.state = self._get_initial_state()
@@ -111,7 +117,7 @@ class DrlEnv(Env):
             else:
                 is_obs = self.mdp.check_observation(stats)
         # do this to avoid stuck obs in the queue to take only the most recent one
-        self.controller.clean_observation_queue()
+        self.mqtts.subscriber.clean_message_queue()
         return stats
 
     def _dict_to_gym_space_sample(self, state_dict: dict) -> OrderedDict[str, Any]:
