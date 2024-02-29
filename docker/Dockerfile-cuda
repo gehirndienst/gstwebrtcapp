@@ -130,6 +130,7 @@ RUN pip install stable-baselines3 sb3-contrib gymnasium tensorboard seaborn jupy
 RUN apt-get update -y && apt-get install -y --fix-missing net-tools iputils-ping iproute2 openconnect && \
     pip install tcconfig && \
     apt-get install -y mosquitto mosquitto-clients && mkdir /var/run/mosquitto/ && chown mosquitto: /var/run/mosquitto/ && pip install paho-mqtt
+COPY mosquitto.conf /etc/mosquitto/mosquitto.conf
 
 # INSTALL RUST
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
