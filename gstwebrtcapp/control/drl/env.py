@@ -18,7 +18,7 @@ class DrlEnv(Env):
         mqtts: MqttPair,
         max_episodes: int = -1,
         state_update_interval: float = 1.0,
-        max_inactivity_time: float = 60.0,
+        max_inactivity_time: float = 10.0,
     ):
         self.mdp = mdp
         self.mqtts = mqtts
@@ -42,7 +42,7 @@ class DrlEnv(Env):
         self.last_action = action
         self.mqtts.publisher.publish(
             self.mqtts.subscriber.topics.actions,
-            json.dumps(action.tolist()) if isinstance(action, np.ndarray) else json.dumps(action),
+            json.dumps(self.mdp.pack_action_for_controller(action)),
         )
 
         # get observation (webrtc stats) from the controller
@@ -99,7 +99,7 @@ class DrlEnv(Env):
         is_obs = False
         time_inactivity_starts = time.time()
         while not is_obs:
-            stats = json.loads(self.mqtts.subscriber.get_message().msg)
+            stats = self.mqtts.subscriber.get_message()
             if stats is None:
                 # this could be triggered if you pulled all queue elements
                 # but none of them passed the check after max timeout
@@ -115,10 +115,10 @@ class DrlEnv(Env):
                 else:
                     continue
             else:
-                is_obs = self.mdp.check_observation(stats)
+                is_obs = self.mdp.check_observation(json.loads(stats.msg))
         # do this to avoid stuck obs in the queue to take only the most recent one
         self.mqtts.subscriber.clean_message_queue()
-        return stats
+        return json.loads(stats.msg)
 
     def _dict_to_gym_space_sample(self, state_dict: dict) -> OrderedDict[str, Any]:
         tuples = []

@@ -212,7 +212,7 @@ class ViewerMDP(MDP):
 
                 # loss rates
                 # 1. fraction loss rate
-                rb_packetslost_diff = get_stat_diff(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
+                rb_packetslost_diff = min(0, get_stat_diff(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost"))
                 fraction_loss_rate = rb_packetslost_diff / packets_sent_diff if packets_sent_diff > 0 else 0
                 # 7. global loss rate
                 loss_rate = (
