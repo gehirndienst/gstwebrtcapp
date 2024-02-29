@@ -140,40 +140,42 @@ class ViewerMDP(MDP):
 
     def create_observation_space(self) -> spaces.Dict:
         # normalized to [0, 1]
-        return spaces.Dict({
-            "fractionLossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "fractionNackRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "fractionPliRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "fractionQueueingRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "fractionRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "gradientRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "interarrivalJitter": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "lossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "rttMean": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "rttStd": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "rxRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-            "txRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
-        })
+        return spaces.Dict(
+            {
+                "fractionLossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "fractionNackRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "fractionPliRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "fractionQueueingRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "fractionRtt": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "interarrivalRttJitter": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "lossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "rttMean": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "rttStd": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "rxGoodput": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "txGoodput": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+            }
+        )
 
     def create_action_space(self) -> spaces.Space:
         # basic AS uses only bitrate, normalized to [-1, 1]
         return spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
 
     def make_default_state(self) -> OrderedDict[str, Any]:
-        return collections.OrderedDict({
-            "fractionLossRate": 0.0,
-            "fractionNackRate": 0.0,
-            "fractionPliRate": 0.0,
-            "fractionQueueingRtt": 0.0,
-            "fractionRtt": 0.0,
-            "gradientRtt": 0.0,
-            "interarrivalJitter": 0.0,
-            "lossRate": 0.0,
-            "rttMean": 0.0,
-            "rttStd": 0.0,
-            "rxRate": 0.0,
-            "txRate": 0.0,
-        })
+        return collections.OrderedDict(
+            {
+                "fractionLossRate": 0.0,
+                "fractionNackRate": 0.0,
+                "fractionPliRate": 0.0,
+                "fractionQueueingRtt": 0.0,
+                "fractionRtt": 0.0,
+                "interarrivalRttJitter": 0.0,
+                "lossRate": 0.0,
+                "rttMean": 0.0,
+                "rttStd": 0.0,
+                "rxGoodput": 0.0,
+                "txGoodput": 0.0,
+            }
+        )
 
     def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
         super().make_state(stats)
@@ -233,12 +235,6 @@ class ViewerMDP(MDP):
 
                 # 4. fraction queueing rtt
                 fraction_queueing_rtt = rtt - min(self.rtts) if len(self.rtts) > 0 else 0.0
-                # 5. gradient rtt
-                gradient_rtt = (
-                    rtt - (ntp_short_format_to_seconds(last_rtp_inbound_ssrc["rb-round-trip"]) / self.MAX_DELAY_SEC)
-                    if last_rtp_inbound_ssrc is not None
-                    else 0.0
-                )
                 # 9. mean rtt
                 rtt_mean = np.mean(self.rtts) if len(self.rtts) > 0 else 0.0
                 # 10. std rtt
@@ -269,20 +265,21 @@ class ViewerMDP(MDP):
                     tx_rate = tx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
 
                 # form the final state
-                state = collections.OrderedDict({
-                    "fractionLossRate": fraction_loss_rate,
-                    "fractionNackRate": fraction_nack_rate,
-                    "fractionPliRate": fraction_pli_rate,
-                    "fractionQueueingRtt": fraction_queueing_rtt,
-                    "fractionRtt": rtt,
-                    "gradientRtt": gradient_rtt,
-                    "interarrivalJitter": interarrival_jitter,
-                    "lossRate": loss_rate,
-                    "rttMean": rtt_mean,
-                    "rttStd": rtt_std,
-                    "rxRate": rx_rate,
-                    "txRate": tx_rate,
-                })
+                state = collections.OrderedDict(
+                    {
+                        "fractionLossRate": fraction_loss_rate,
+                        "fractionNackRate": fraction_nack_rate,
+                        "fractionPliRate": fraction_pli_rate,
+                        "fractionQueueingRtt": fraction_queueing_rtt,
+                        "fractionRtt": rtt,
+                        "interarrivalRttJitter": interarrival_jitter,
+                        "lossRate": loss_rate,
+                        "rttMean": rtt_mean,
+                        "rttStd": rtt_std,
+                        "rxGoodput": rx_rate,
+                        "txGoodput": tx_rate,
+                    }
+                )
 
                 self.last_states.append(state)
                 return state
@@ -292,20 +289,21 @@ class ViewerMDP(MDP):
 
     def convert_to_unscaled_state(self, state: OrderedDict[str, Any]) -> OrderedDict[str, Any]:
         return (
-            collections.OrderedDict({
-                "fractionLossRate": state["fractionLossRate"],
-                "fractionNackRate": state["fractionNackRate"],
-                "fractionPliRate": state["fractionPliRate"],
-                "fractionQueueingRtt": state["fractionQueueingRtt"] * self.MAX_DELAY_SEC,
-                "fractionRtt": state["fractionRtt"] * self.MAX_DELAY_SEC,
-                "gradientRtt": state["gradientRtt"] * self.MAX_DELAY_SEC,
-                "interarrivalJitter": state["interarrivalJitter"] * self.MAX_DELAY_SEC,
-                "lossRate": state["lossRate"],
-                "rttMean": state["rttMean"] * self.MAX_DELAY_SEC,
-                "rttStd": state["rttStd"] * self.MAX_DELAY_SEC,
-                "rxRate": state["rxRate"] * self.MAX_BITRATE_STREAM_MBPS,
-                "txRate": state["txRate"] * self.MAX_BITRATE_STREAM_MBPS,
-            })
+            collections.OrderedDict(
+                {
+                    "fractionLossRate": state["fractionLossRate"],
+                    "fractionNackRate": state["fractionNackRate"],
+                    "fractionPliRate": state["fractionPliRate"],
+                    "fractionQueueingRtt": state["fractionQueueingRtt"] * self.MAX_DELAY_SEC,
+                    "fractionRtt": state["fractionRtt"] * self.MAX_DELAY_SEC,
+                    "interarrivalRttJitter": state["interarrivalRttJitter"] * self.MAX_DELAY_SEC,
+                    "lossRate": state["lossRate"],
+                    "rttMean": state["rttMean"] * self.MAX_DELAY_SEC,
+                    "rttStd": state["rttStd"] * self.MAX_DELAY_SEC,
+                    "rxGoodput": state["rxGoodput"] * self.MAX_BITRATE_STREAM_MBPS,
+                    "txGoodput": state["txGoodput"] * self.MAX_BITRATE_STREAM_MBPS,
+                }
+            )
             if self.is_scaled
             else state
         )

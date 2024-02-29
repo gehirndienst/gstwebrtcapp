@@ -98,7 +98,7 @@ class QoeAhoy(RewardFunction):
         super().calculate_reward(states)
 
         # 1. rate: 0...0.2
-        reward_rate = np.log((np.exp(1) - 1) * (self.state["rxRate"]) + 1)
+        reward_rate = np.log((np.exp(1) - 1) * (self.state["rxGoodput"]) + 1)
         reward_rate *= 0.2
 
         # 2. rtt: 0...0.2
@@ -128,13 +128,13 @@ class QoeAhoy(RewardFunction):
 
         # 4. jitter: 0...0.15
         # max 250 ms, more than that is very bad, 10 ms jitter is considered to be acceptable
-        thresholded_jitter = max(0, self.state["interarrivalJitter"] - 0.01)
+        thresholded_jitter = max(0, self.state["interarrivalRttJitter"] - 0.01)
         reward_jitter = max(0, 0.5 - np.sqrt(thresholded_jitter))
         reward_jitter *= 0.4
 
         # 5. smooth: take rate of change: 0...0.1
-        rate_prev = self.prev_state["rxRate"] if self.prev_state is not None else 0.0
-        rate_of_change = abs(self.state["rxRate"] - rate_prev)
+        rate_prev = self.prev_state["rxGoodput"] if self.prev_state is not None else 0.0
+        rate_of_change = abs(self.state["rxGoodput"] - rate_prev)
         # don't penalize if bitrate changes less than 10% or if it's the first state
         reward_smooth = 1 if rate_of_change <= 0.1 or rate_prev == 0.0 else 1 - rate_of_change
         reward_smooth *= 0.05
@@ -159,8 +159,8 @@ class QoeAhoy(RewardFunction):
         if (
             self.state["fractionLossRate"] > 0.2
             or self.state["fractionRtt"] > 0.3
-            or (self.state["txRate"] > 0 and self.state["rxRate"] / self.state["txRate"] < 0.2)
-            or self.state["interarrivalJitter"] > 0.25
+            or (self.state["txGoodput"] > 0 and self.state["rxGoodput"] / self.state["txGoodput"] < 0.2)
+            or self.state["interarrivalRttJitter"] > 0.25
             or self.state["fractionPliRate"] > 0.001
         ):
             reward = 0.0

@@ -76,7 +76,7 @@ class DrlModelConfigurator:
 
     def _parse(self, dict_params: Dict[str, Any]) -> Dict[str, Any]:
         # typecast str-like activation function to torch.nn.Module object
-        if 'activation_fn' in dict_params["policy_kwargs"]:
+        if "policy_kwargs" in dict_params and 'activation_fn' in dict_params["policy_kwargs"]:
             activation_fn_name = dict_params["policy_kwargs"]["activation_fn"].lower()
             if activation_fn_name in ACTIVATION_FUNCTIONS:
                 dict_params["policy_kwargs"]["activation_fn"] = ACTIVATION_FUNCTIONS[activation_fn_name]
