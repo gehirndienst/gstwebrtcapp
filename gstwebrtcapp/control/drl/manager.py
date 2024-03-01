@@ -46,6 +46,9 @@ class DrlManager:
         self._setup()
 
     def _setup(self) -> None:
+        # set mqqts for the mdp
+        self.mdp.mqtts = self.mqtts
+
         # set paths
         self.log_path, self.model_path = self._set_save_paths(self.config.save_log_path, self.config.save_model_path)
 

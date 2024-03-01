@@ -363,7 +363,7 @@ class AhoyConnector:
     async def handle_actions(self) -> None:
         LOGGER.info(f"OK: ACTIONS HANDLER IS ON -- ready to pick and apply actions")
         while self.is_running:
-            action_msg = await self.mqtts.subscriber.message_queue.get()
+            action_msg = await self.mqtts.subscriber.message_queues[self.mqtt_config.topics.actions].get()
             msg = json.loads(action_msg.msg)
             if self._app is not None and len(msg) > 0:
                 for action in msg:
@@ -382,6 +382,14 @@ class AhoyConnector:
                                 self._app.set_framerate(msg[action])
                             case _:
                                 LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
+        LOGGER.info(f"OK: ACTION HANDLER IS OFF!")
+
+    async def handle_bandwidth_estimations(self) -> None:
+        LOGGER.info(f"OK: BANDWIDTH ESTIMATIONS HANDLER IS ON -- ready to publish bandwidth estimations")
+        while self.is_running:
+            gcc_bw = await self._app.gcc_estimated_bitrates.get()
+            self.mqtts.publisher.publish(self.mqtt_config.topics.gcc, str(gcc_bw))
+        LOGGER.info(f"OK: BANDWIDTH ESTIMATIONS HANDLER IS OFF!")
 
     async def webrtc_coro(self) -> None:
         while not (self._app and self._app.is_running):
@@ -400,7 +408,8 @@ class AhoyConnector:
             pipeline_task = asyncio.create_task(self._app.handle_pipeline())
             webrtcbin_stats_task = asyncio.create_task(self.handle_webrtcbin_stats())
             actions_task = asyncio.create_task(self.handle_actions())
-            tasks = [signalling_task, pipeline_task, webrtcbin_stats_task, actions_task]
+            be_task = asyncio.create_task(self.handle_bandwidth_estimations())
+            tasks = [signalling_task, pipeline_task, webrtcbin_stats_task, actions_task, be_task]
             if self.agent is not None:
                 # start agents thread
                 self.agent_thread = threading.Thread(target=self.agent.run, args=(True,), daemon=True)

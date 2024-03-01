@@ -12,8 +12,7 @@ License:
 
 """
 
-from collections import deque
-from datetime import datetime
+import asyncio
 from typing import Any, List
 import gi
 
@@ -48,7 +47,7 @@ class AhoyApp(GstWebRTCApp):
         self.pay_capsfilter = None
         self.transceivers = []
         self.gcc = None
-        self.gcc_estimated_bitrates = deque(maxlen=1000)
+        self.gcc_estimated_bitrates = asyncio.Queue()
         self.bus = None
 
         super().__init__(config)
@@ -263,7 +262,6 @@ class AhoyApp(GstWebRTCApp):
     def _on_estimated_bitrate_changed(self, bwe, pspec) -> None:
         if bwe and pspec.name == "estimated-bitrate":
             estimated_bitrate = self.gcc.get_property(pspec.name)
-            time_now = datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3]
-            self.gcc_estimated_bitrates.append((time_now, estimated_bitrate))
+            self.gcc_estimated_bitrates.put_nowait(estimated_bitrate)
         else:
             raise GSTWEBRTCAPP_EXCEPTION("Can't get estimated bitrate by gcc")

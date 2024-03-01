@@ -5,7 +5,7 @@ import numpy as np
 from typing import Any, Dict, OrderedDict, Tuple
 
 from control.drl.reward import RewardFunctionFactory
-from utils.base import LOGGER
+from utils.base import LOGGER, scale, unscale
 from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
@@ -19,11 +19,15 @@ class MDP(metaclass=ABCMeta):
 
     MAX_BITRATE_STREAM_MBPS = 10  # so far for 1 stream only, later we can have multiple streams
     MIN_BITRATE_STREAM_MBPS = 0.4  # so far for 1 stream only, later we can have multiple streams
+    MAX_BANDWIDTH_MBPS = 20
+    MIN_BANDWIDTH_MBPS = 0.4
     MAX_DELAY_SEC = 1  # assume we target the sub-second latency
 
     CONSTANTS = {
         "MAX_BITRATE_STREAM_MBPS": MAX_BITRATE_STREAM_MBPS,
         "MIN_BITRATE_STREAM_MBPS": MIN_BITRATE_STREAM_MBPS,
+        "MAX_BANDWIDTH_MBPS": MAX_BANDWIDTH_MBPS,
+        "MIN_BANDWIDTH_MBPS": MIN_BANDWIDTH_MBPS,
         "MAX_DELAY_SEC": MAX_DELAY_SEC,
     }
 
@@ -43,6 +47,7 @@ class MDP(metaclass=ABCMeta):
             for key in constants:
                 self.CONSTANTS[key] = constants[key]
 
+        self.mqtts = None
         self.states_made = 0
         self.is_scaled = False
         self.last_stats = None
@@ -144,6 +149,7 @@ class ViewerMDP(MDP):
         # normalized to [0, 1]
         return spaces.Dict(
             {
+                "bandwidth": spaces.Box(low=0, high=1, shape=(2,), dtype=np.float32),
                 "fractionLossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
                 "fractionNackRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
                 "fractionPliRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
@@ -165,6 +171,7 @@ class ViewerMDP(MDP):
     def make_default_state(self) -> OrderedDict[str, Any]:
         return collections.OrderedDict(
             {
+                "bandwidth": [0.0, 0.0],
                 "fractionLossRate": 0.0,
                 "fractionNackRate": 0.0,
                 "fractionPliRate": 0.0,
@@ -181,6 +188,27 @@ class ViewerMDP(MDP):
 
     def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
         super().make_state(stats)
+        # get gcc bandiwdth
+        bws = []
+        while not self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.gcc].empty():
+            msg = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.gcc)
+            bws.append(float(msg.msg))
+        self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.gcc)
+        if len(bws) == 0:
+            if not self.last_states:
+                bandwidth = [0.0, 0.0]
+            else:
+                bandwidth = [1.0, 1.0]
+        elif len(bws) == 1:
+            bandwidth = [
+                scale(bws[0] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
+                scale(bws[0] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
+            ]
+        else:
+            bandwidth = [
+                scale(bws[0] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
+                scale(bws[-1] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
+            ]
 
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
@@ -270,6 +298,7 @@ class ViewerMDP(MDP):
                 # form the final state
                 state = collections.OrderedDict(
                     {
+                        "bandwidth": bandwidth,
                         "fractionLossRate": fraction_loss_rate,
                         "fractionNackRate": fraction_nack_rate,
                         "fractionPliRate": fraction_pli_rate,
@@ -294,6 +323,7 @@ class ViewerMDP(MDP):
         return (
             collections.OrderedDict(
                 {
+                    "bandwidth": unscale(state["bandwidth"], self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
                     "fractionLossRate": state["fractionLossRate"],
                     "fractionNackRate": state["fractionNackRate"],
                     "fractionPliRate": state["fractionPliRate"],
@@ -303,8 +333,12 @@ class ViewerMDP(MDP):
                     "lossRate": state["lossRate"],
                     "rttMean": state["rttMean"] * self.MAX_DELAY_SEC,
                     "rttStd": state["rttStd"] * self.MAX_DELAY_SEC,
-                    "rxGoodput": state["rxGoodput"] * self.MAX_BITRATE_STREAM_MBPS,
-                    "txGoodput": state["txGoodput"] * self.MAX_BITRATE_STREAM_MBPS,
+                    "rxGoodput": unscale(
+                        state["rxGoodput"], self.MIN_BITRATE_STREAM_MBPS, self.MAX_BITRATE_STREAM_MBPS
+                    ),
+                    "txGoodput": unscale(
+                        state["txGoodput"], self.MIN_BITRATE_STREAM_MBPS, self.MAX_BITRATE_STREAM_MBPS
+                    ),
                 }
             )
             if self.is_scaled
