@@ -48,7 +48,7 @@ class CsvViewerRecorderAgent(Agent):
             gst_stats = self._fetch_stats()
             if gst_stats is not None:
                 is_stats = self._select_stats(gst_stats)
-                self.mqtts.subscriber.clean_message_queue()
+                self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.stats)
                 if is_stats and self.verbose > 0:
                     if self.verbose == 1:
                         LOGGER.info(f"INFO: Browser Recorder agent stats:\n {self.stats[-1]}")
@@ -58,7 +58,7 @@ class CsvViewerRecorderAgent(Agent):
     def _fetch_stats(self) -> Dict[str, Any] | None:
         time.sleep(self.stats_update_interval)
         ticks = 0
-        gst_stats = self.mqtts.subscriber.get_message()
+        gst_stats = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.stats)
         while gst_stats is None:
             time.sleep(0.1)
             ticks += 1
@@ -66,7 +66,7 @@ class CsvViewerRecorderAgent(Agent):
                 LOGGER.info("WARNING: No stats were pulled from the observation queue after 3 seconds timeout...")
                 return None
             else:
-                gst_stats = self.mqtts.subscriber.get_message()
+                gst_stats = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.stats)
         return json.loads(gst_stats.msg)
 
     def _select_stats(self, gst_stats: Dict[str, Any]) -> bool:

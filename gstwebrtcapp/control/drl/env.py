@@ -85,7 +85,7 @@ class DrlEnv(Env):
     def _get_observation(self) -> Optional[Dict[str, Any]]:
         start_fetch_time = time.time()
         while (
-            self.mqtts.subscriber.message_queue.empty()
+            self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.stats].empty()
             and time.time() - start_fetch_time < self.state_update_interval * 2
         ):
             time.sleep(self.state_update_interval)
@@ -99,7 +99,7 @@ class DrlEnv(Env):
         is_obs = False
         time_inactivity_starts = time.time()
         while not is_obs:
-            stats = self.mqtts.subscriber.get_message()
+            stats = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.stats)
             if stats is None:
                 # this could be triggered if you pulled all queue elements
                 # but none of them passed the check after max timeout
@@ -117,7 +117,7 @@ class DrlEnv(Env):
             else:
                 is_obs = self.mdp.check_observation(json.loads(stats.msg))
         # do this to avoid stuck obs in the queue to take only the most recent one
-        self.mqtts.subscriber.clean_message_queue()
+        self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.stats)
         return json.loads(stats.msg)
 
     def _dict_to_gym_space_sample(self, state_dict: dict) -> OrderedDict[str, Any]:

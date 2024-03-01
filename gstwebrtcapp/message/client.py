@@ -1,6 +1,6 @@
 from abc import ABCMeta
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 import json
 import secrets
@@ -115,7 +115,9 @@ class MqttSubscriber(MqttClient):
         config: MqttConfig = MqttConfig(""),
     ) -> None:
         super().__init__(config)
-        self.message_queue = asyncio.Queue()
+        self.message_queues: Dict[str, asyncio.Queue] = {}
+        for f in fields(self.topics):
+            self.message_queues[getattr(self.topics, f.name)] = asyncio.Queue()
 
     def on_message(self, _, __, msg) -> None:
         payload = json.loads(msg.payload.decode('utf8'))
@@ -125,7 +127,9 @@ class MqttSubscriber(MqttClient):
             msg=payload['msg'],
             topic=msg.topic,
         )
-        self.message_queue.put_nowait(mqtt_message)
+        if msg.topic not in self.message_queues:
+            self.message_queues[msg.topic] = asyncio.Queue()
+        self.message_queues[msg.topic].put_nowait(mqtt_message)
         LOGGER.debug(f"Received message: {payload}")
 
     def subscribe(self, topics: List[str]) -> None:
@@ -135,14 +139,20 @@ class MqttSubscriber(MqttClient):
             self.client.on_message = self.on_message
             LOGGER.info(f"OK: MQTT subscriber {self.id} has successfully subscribed to {topic}")
 
-    def get_message(self) -> MqttMessage | None:
-        if self.is_running and not self.message_queue.empty():
-            return self.message_queue.get_nowait()
+    def get_message(self, topic: str) -> MqttMessage | None:
+        queue = self.message_queues.get(topic, None)
+        if queue is None:
+            LOGGER.error(f"ERROR: No message queue for topic {topic}")
+        if self.is_running and not queue.empty():
+            return queue.get_nowait()
         return None
 
-    def clean_message_queue(self) -> None:
-        while not self.message_queue.empty():
-            _ = self.message_queue.get_nowait()
+    def clean_message_queue(self, topic: str) -> None:
+        queue = self.message_queues.get(topic, None)
+        if queue is None:
+            LOGGER.error(f"ERROR: No message queue for topic {topic}")
+        while not queue.empty():
+            _ = queue.get_nowait()
 
 
 @dataclass
