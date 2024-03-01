@@ -17,9 +17,9 @@ class MDP(metaclass=ABCMeta):
     that could be directly applied to the GStreamer pipeline and vice versa.
     '''
 
-    MAX_BITRATE_STREAM_MBPS = 10  # so far for 1 stream only, later we can have multiple streams
+    MAX_BITRATE_STREAM_MBPS = 10.0  # so far for 1 stream only, later we can have multiple streams
     MIN_BITRATE_STREAM_MBPS = 0.4  # so far for 1 stream only, later we can have multiple streams
-    MAX_BANDWIDTH_MBPS = 20
+    MAX_BANDWIDTH_MBPS = 20.0
     MIN_BANDWIDTH_MBPS = 0.4
     MAX_DELAY_SEC = 1  # assume we target the sub-second latency
 
@@ -193,7 +193,7 @@ class ViewerMDP(MDP):
         while not self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.gcc].empty():
             msg = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.gcc)
             bws.append(float(msg.msg))
-        self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.gcc)
+        bws = [b / 1e6 for b in bws]
         if len(bws) == 0:
             if not self.last_states:
                 bandwidth = [0.0, 0.0]
@@ -201,15 +201,14 @@ class ViewerMDP(MDP):
                 bandwidth = [1.0, 1.0]
         elif len(bws) == 1:
             bandwidth = [
-                scale(bws[0] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
-                scale(bws[0] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
+                scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
+                scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
             ]
         else:
             bandwidth = [
-                scale(bws[0] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
-                scale(bws[-1] / 1000000, self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
+                scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
+                scale(bws[-1], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
             ]
-
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
         rtp_inbound = find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
@@ -261,7 +260,7 @@ class ViewerMDP(MDP):
                 fraction_pli_rate = recv_pli_count_diff / packets_recv_diff if packets_recv_diff > 0 else 0.0
 
                 # rtts: RTT comes in NTP short format
-                rtt = ntp_short_format_to_seconds(rtp_inbound[i]["rb-round-trip"]) / self.MAX_DELAY_SEC
+                rtt = ntp_short_format_to_seconds(rtp_inbound[i]["rb-round-trip"]) / self.CONSTANTS["MAX_DELAY_SEC"]
                 self.rtts.append(rtt)
 
                 # 4. fraction queueing rtt
@@ -274,26 +273,40 @@ class ViewerMDP(MDP):
                 # 6. jitter: comes in clock units
                 interarrival_jitter = (
                     clock_units_to_seconds(rtp_inbound[i]["rb-jitter"], rtp_outbound[0]["clock-rate"])
-                    / self.MAX_DELAY_SEC
+                    / self.CONSTANTS["MAX_DELAY_SEC"]
                 )
 
                 # 11. rx rate
                 try:
                     bitrate_recv = ice_candidate_pair[0]["bitrate-recv"]
-                    rx_rate = bitrate_recv / 1000000 / self.MAX_BITRATE_STREAM_MBPS
+                    rx_rate = scale(
+                        bitrate_recv / 1000000,
+                        self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
+                        self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"],
+                    )
                 except KeyError:
                     rx_bytes_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-received")
                     rx_mbits_diff = rx_bytes_diff * 8 / 1000000
-                    rx_rate = rx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
+                    rx_rate = rx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
+                    rx_rate = scale(
+                        rx_rate, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"]
+                    )
 
                 # 12. tx rate
                 try:
                     bitrate_sent = ice_candidate_pair[0]["bitrate-sent"]
-                    tx_rate = bitrate_sent / 1000000 / self.MAX_BITRATE_STREAM_MBPS
+                    tx_rate = scale(
+                        bitrate_sent / 1000000,
+                        self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
+                        self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"],
+                    )
                 except KeyError:
                     tx_bytes_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-sent")
                     tx_mbits_diff = tx_bytes_diff * 8 / 1000000
-                    tx_rate = tx_mbits_diff / (ts_diff_sec * self.MAX_BITRATE_STREAM_MBPS) if ts_diff_sec > 0 else 0.0
+                    tx_rate = tx_mbits_diff / ts_diff_sec if ts_diff_sec > 0 else 0.0
+                    tx_rate = scale(
+                        tx_rate, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"]
+                    )
 
                 # form the final state
                 state = collections.OrderedDict(
@@ -323,7 +336,10 @@ class ViewerMDP(MDP):
         return (
             collections.OrderedDict(
                 {
-                    "bandwidth": unscale(state["bandwidth"], self.MIN_BANDWIDTH_MBPS, self.MAX_BANDWIDTH_MBPS),
+                    "bandwidth": [
+                        unscale(s, self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"])
+                        for s in state["bandwidth"]
+                    ],
                     "fractionLossRate": state["fractionLossRate"],
                     "fractionNackRate": state["fractionNackRate"],
                     "fractionPliRate": state["fractionPliRate"],
@@ -334,10 +350,14 @@ class ViewerMDP(MDP):
                     "rttMean": state["rttMean"] * self.MAX_DELAY_SEC,
                     "rttStd": state["rttStd"] * self.MAX_DELAY_SEC,
                     "rxGoodput": unscale(
-                        state["rxGoodput"], self.MIN_BITRATE_STREAM_MBPS, self.MAX_BITRATE_STREAM_MBPS
+                        state["rxGoodput"],
+                        self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
+                        self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"],
                     ),
                     "txGoodput": unscale(
-                        state["txGoodput"], self.MIN_BITRATE_STREAM_MBPS, self.MAX_BITRATE_STREAM_MBPS
+                        state["txGoodput"],
+                        self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
+                        self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"],
                     ),
                 }
             )
