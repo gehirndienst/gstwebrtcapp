@@ -60,3 +60,27 @@ async def async_wait_for_condition(
             raise TimeoutError(f"Timeout {timeout_sec} sec is reached for condition {condition_func.__name__}")
         await asyncio.sleep(sleeping_time_sec)
     return True
+
+
+def scale(val: int | float, min: int | float, max: int | float) -> int | float:
+    """
+    Scale value to 0,1 range
+
+    :param val: value to scale
+    :param min: minimum value
+    :param max: maximum value
+    :return: scaled value
+    """
+    return (val - min) / (max - min) if min < max or (max - min) != 0 else 0.0
+
+
+def unscale(scaled_val: int | float, min: int | float, max: int | float) -> int | float:
+    """
+    Unscale value from 0,1 range to original range
+
+    :param scaled_val: scaled value
+    :param min: minimum value
+    :param max: maximum value
+    :return: unscaled value
+    """
+    return scaled_val * (max - min) + min if min < max else min
