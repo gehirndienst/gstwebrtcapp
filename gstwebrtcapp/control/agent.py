@@ -36,20 +36,21 @@ class Agent(metaclass=ABCMeta):
             publisher=MqttPublisher(self.mqtt_config),
             subscriber=MqttSubscriber(self.mqtt_config),
         )
+        self.mqtts_threads = []
+        self.type = AgentType.ABSTRACT
+
+    def run(self, *args, **kwargs) -> None:
         self.mqtts_threads = [
             threading.Thread(target=self.mqtts.publisher.run, daemon=True).start(),
             threading.Thread(target=self.mqtts.subscriber.run, daemon=True).start(),
         ]
         self.mqtts.subscriber.subscribe([self.mqtt_config.topics.gcc])
         self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])
-        self.type = AgentType.ABSTRACT
-
-    def run(self, *args, **kwargs) -> None:
-        pass
 
     def stop(self) -> None:
         self.mqtts.publisher.stop()
         self.mqtts.subscriber.stop()
-        for t in self.mqtts_threads:
-            if t:
-                t.join()
+        if self.mqtts_threads:
+            for t in self.mqtts_threads:
+                if t:
+                    t.join()
