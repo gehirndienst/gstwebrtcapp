@@ -37,7 +37,6 @@ class SinkConnector:
         server: str = "ws://127.0.0.1:8443",
         pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
         agent: Agent | None = None,
-        stats_update_interval: float = 1.0,
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
     ):
@@ -61,7 +60,6 @@ class SinkConnector:
             subscriber=MqttSubscriber(self.mqtt_config),
         )
         self.mqtts_threads = None
-        self.stats_update_interval = stats_update_interval
         self.network_controller = network_controller
 
         self._app = None
@@ -141,7 +139,7 @@ class SinkConnector:
     async def handle_webrtcsink_stats(self) -> None:
         LOGGER.info(f"OK: WEBRTCSINK STATS HANDLER IS ON -- ready to check for stats")
         while self.is_running:
-            await asyncio.sleep(self.stats_update_interval)
+            await asyncio.sleep(0.1)
             stats = {}
             stats_struct = self.app.webrtcsink.get_property("stats")
             if stats_struct.n_fields() > 0:

@@ -137,7 +137,6 @@ async def test_csv_recorder():
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
             feed_name="recorder_test",
-            stats_update_interval=stats_update_interval,
         )
 
         await conn.connect_coro()
@@ -196,7 +195,6 @@ async def test_drl():
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
             feed_name="drl_test",
-            stats_update_interval=stats_update_interval,
         )
 
         await conn.connect_coro()
@@ -244,10 +242,10 @@ async def test_drl_eval():
 
         conn = AhoyConnector(
             pipeline_config=app_cfg,
+            agent=agent,
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
             feed_name="test_drl_eval",
-            stats_update_interval=1.0,
         )
 
         await conn.connect_coro()
@@ -277,7 +275,6 @@ async def test_network_controller():
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
             feed_name="test_network_controller",
-            stats_update_interval=1.0,
             network_controller=network_controller,
         )
 

@@ -4,11 +4,11 @@ from gymnasium.core import Env
 from gymnasium.spaces import Box, MultiDiscrete
 import numpy as np
 import time
-from typing import Any, Dict, List, Optional, OrderedDict
+from typing import Any, Dict, List, OrderedDict
 
 from control.drl.mdp import MDP
 from message.client import MqttPair
-from utils.base import LOGGER
+from utils.base import LOGGER, merge_observations, select_n_equidistant_elements_from_list
 
 
 class DrlEnv(Env):
@@ -82,27 +82,21 @@ class DrlEnv(Env):
         LOGGER.info(f"INFO: resetting the DRL env: episodes {self.episodes}, is finished {self.is_finished}")
         return self.state, {}
 
-    def _get_observation(self) -> Optional[Dict[str, Any]]:
-        start_fetch_time = time.time()
-        while (
-            self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.stats].empty()
-            and time.time() - start_fetch_time < self.state_update_interval * 2
-        ):
-            time.sleep(self.state_update_interval)
-            if self.is_finished:
-                # this could be triggered e.g., by agent.stop() call or by DrlBreakCallback
-                LOGGER.info("WARNING: Interrupted by a finish signal, closing the env...")
-                self.state = self._get_initial_state()
-                self.reward = 0.0
-                return None
+    def _get_observation(self) -> Dict[str, Any] | None:
+        time.sleep(self.state_update_interval)
+        if self.is_finished:
+            # this could be triggered e.g., by agent.stop() call or by DrlBreakCallback
+            LOGGER.info("WARNING: Interrupted by a finish signal, closing the env...")
+            self.state = self._get_initial_state()
+            self.reward = 0.0
+            return None
 
-        is_obs = False
         time_inactivity_starts = time.time()
-        while not is_obs:
+        is_collected = False
+        obs_list = []
+        while not is_collected:
             stats = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.stats)
             if stats is None:
-                # this could be triggered if you pulled all queue elements
-                # but none of them passed the check after max timeout
                 if time.time() - time_inactivity_starts > self.max_inactivity_time:
                     LOGGER.warning(
                         "WARNING: No stats were pulled from the observation queue after"
@@ -112,15 +106,21 @@ class DrlEnv(Env):
                     self.state = self._get_initial_state()
                     self.reward = 0.0
                     return None
-                else:
-                    continue
             else:
-                is_obs = self.mdp.check_observation(json.loads(stats.msg))
-        # do this to avoid stuck obs in the queue to take only the most recent one
-        self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.stats)
-        return json.loads(stats.msg)
+                stats_unwrapped = json.loads(stats.msg)
+                if self.mdp.check_observation(stats_unwrapped):
+                    obs_list.append(stats_unwrapped)
+                is_collected = (
+                    len(obs_list) >= self.mdp.num_observations_for_state
+                    and self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.stats].empty()
+                )
 
-    def _dict_to_gym_space_sample(self, state_dict: dict) -> OrderedDict[str, Any]:
+        # 15% of the observations are selected to be cut to prevent the influence of the last action
+        obs_list = select_n_equidistant_elements_from_list(obs_list, self.mdp.num_observations_for_state, 15)
+        final_obs_dict = merge_observations(obs_list) if len(obs_list) > 1 else obs_list[0]
+        return final_obs_dict
+
+    def _dict_to_gym_space_sample(self, state_dict: Dict[str, Any]) -> OrderedDict[str, Any]:
         tuples = []
         for key, space in self.observation_space.items():
             if isinstance(space, Box):

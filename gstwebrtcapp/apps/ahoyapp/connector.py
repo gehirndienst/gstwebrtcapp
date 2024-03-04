@@ -47,7 +47,6 @@ class AhoyConnector:
     :param str feed_name: Feed name for the connection.
     :param str signalling_channel_name: Name of the signalling channel.
     :param str stats_channel_name: Name of the stats channel.
-    :param float stats_update_interval: Interval for requesting/receiving new webrtc stats.
     :param MqttConfig mqtt_config: Configuration for the MQTT client.
     :param NetworkController network_controller: Network controller that optionally controls the network rules. Nullable.
     """
@@ -61,7 +60,6 @@ class AhoyConnector:
         feed_name: str = "gstreamerwebrtcapp",
         signalling_channel_name: str = "control",
         stats_channel_name: str = "telemetry",
-        stats_update_interval: float = 1.0,
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
     ):
@@ -92,7 +90,6 @@ class AhoyConnector:
             subscriber=MqttSubscriber(self.mqtt_config),
         )
         self.mqtts_threads = None
-        self.stats_update_interval = stats_update_interval
         self.network_controller = network_controller
 
         self.is_running = False
@@ -355,7 +352,7 @@ class AhoyConnector:
     async def handle_webrtcbin_stats(self) -> None:
         LOGGER.info(f"OK: WEBRTCBIN STATS HANDLER IS ON -- ready to check for stats")
         while self.is_running:
-            await asyncio.sleep(self.stats_update_interval)
+            await asyncio.sleep(0.1)
             promise = Gst.Promise.new_with_change_func(self._on_get_webrtcbin_stats, None, None)
             self._app.webrtcbin.emit('get-stats', None, promise)
         LOGGER.info(f"OK: WEBRTCBIN STATS HANDLER IS OFF!")

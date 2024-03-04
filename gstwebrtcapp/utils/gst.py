@@ -106,6 +106,16 @@ def get_stat_diff(stats: Dict[str, Any], last_stats: Dict[str, Any] | None, stat
     return stats[stat] - last_stats[stat] if last_stats is not None else stats[stat]
 
 
+def get_stat_diff_concat(
+    stats: Dict[str, List[Any]], last_stats: Dict[str, List[Any]] | None, stat: str
+) -> List[float | int]:
+    last_value = last_stats[stat][-1] if last_stats is not None else 0.0
+    res = []
+    for i in range(len(stats[stat])):
+        res.append(stats[stat][i] - stats[stat][i - 1] if i > 0 else stats[stat][i] - last_value)
+    return res
+
+
 def is_same_rtcp(rtp_inbound: Dict[str, Any], last_rtp_inbound: Dict[str, Any] | None) -> bool:
     if last_rtp_inbound is None:
         return False
