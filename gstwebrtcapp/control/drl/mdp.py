@@ -54,6 +54,8 @@ class MDP(metaclass=ABCMeta):
         self.is_scaled = False
         self.last_stats = None
         self.last_states = collections.deque(maxlen=self.state_history_size + 1)
+        self.max_rb_packetslost = 0
+        self.first_ssrc = None
         self.obs_filter = None
 
     @abstractmethod
@@ -104,11 +106,32 @@ class MDP(metaclass=ABCMeta):
         return dict(zip(self.reward_function.reward_parts, [0.0] * len(self.reward_function.reward_parts)))
 
     def check_observation(self, obs: Dict[str, Any]) -> bool:
+        # rtp inbound stream is the most important stat
+        rtp_inbounds = find_stat(obs, GstWebRTCStatsType.RTP_INBOUND_STREAM)
+        if not rtp_inbounds:
+            return False
+
+        # filter over other stats
         if self.obs_filter is not None:
             for stat in self.obs_filter:
-                if not find_stat(obs, stat):
-                    return False
-        return True
+                if stat != GstWebRTCStatsType.RTP_INBOUND_STREAM:
+                    if not find_stat(obs, stat):
+                        return False
+
+        # check that pl not smaller than last max seen packet lost
+        for rtp_inbound in rtp_inbounds:
+            # haven't seen any packet lost yet
+            if self.first_ssrc is None:
+                return True
+            else:
+                if rtp_inbound["ssrc"] == self.first_ssrc:
+                    rb_packetslost = rtp_inbound["rb-packetslost"]
+                    # assumed that packet lost increases more or less in the same manner
+                    if rb_packetslost < self.max_rb_packetslost:
+                        return False
+                    else:
+                        self.max_rb_packetslost = rb_packetslost
+                        return True
 
     def is_terminated(self, step: int) -> bool:
         return False
