@@ -274,12 +274,17 @@ class ViewerMDP(MDP):
                 # loss rates
                 # 1. fraction loss rate
                 rb_packetslost_diff = get_stat_diff(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
-                fraction_loss_rate = rb_packetslost_diff / packets_sent_diff if packets_sent_diff > 0 else 0
+                fraction_loss_rate = (
+                    rb_packetslost_diff / (packets_sent_diff + rb_packetslost_diff)
+                    if packets_sent_diff + rb_packetslost_diff > 0
+                    else 0
+                )
                 fraction_loss_rate = max(0, min(1, fraction_loss_rate))
                 # 7. global loss rate
                 loss_rate = (
-                    rtp_inbound[i]["rb-packetslost"] / rtp_outbound[0]["packets-sent"]
-                    if rtp_outbound[0]["packets-sent"] > 0
+                    rtp_inbound[i]["rb-packetslost"]
+                    / (rtp_outbound[0]["packets-sent"] + rtp_inbound[i]["rb-packetslost"])
+                    if rtp_outbound[0]["packets-sent"] + rtp_inbound[i]["rb-packetslost"] > 0
                     else 0.0
                 )
 
@@ -546,11 +551,12 @@ class ViewerSeqMDP(MDP):
                 # 1. fraction loss rate
                 rb_packetslost_diff = get_stat_diff_concat(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
                 fraction_loss_rates = [
-                    lost / sent if sent > 0 else 0.0 for lost, sent in zip(rb_packetslost_diff, packets_sent_diff)
+                    lost / (sent + lost) if sent + lost > 0 else 0.0
+                    for lost, sent in zip(rb_packetslost_diff, packets_sent_diff)
                 ]
                 # 7. global loss rate
                 loss_rates = [
-                    lost / sent if sent > 0 else 0.0
+                    lost / (sent + lost) if sent + lost > 0 else 0.0
                     for lost, sent in zip(rtp_inbound[i]["rb-packetslost"], rtp_outbound[0]["packets-sent"])
                 ]
 

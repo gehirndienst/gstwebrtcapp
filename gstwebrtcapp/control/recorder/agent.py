@@ -107,8 +107,9 @@ class CsvViewerRecorderAgent(Agent):
 
             # loss rate
             loss_rate = (
-                float(rtp_inbound_ssrc["rb-packetslost"]) / rtp_outbound[0]["packets-sent"]
-                if rtp_outbound[0]["packets-sent"] > 0
+                float(rtp_inbound_ssrc["rb-packetslost"])
+                / (rtp_outbound[0]["packets-sent"] + rtp_inbound_ssrc["rb-packetslost"])
+                if rtp_outbound[0]["packets-sent"] + rtp_inbound_ssrc["rb-packetslost"] > 0
                 else 0.0
             )
 
