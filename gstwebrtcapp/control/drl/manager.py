@@ -82,6 +82,7 @@ class DrlManager:
             mqtts=self.mqtts,
             max_episodes=self.episodes,
             state_update_interval=self.config.state_update_interval,
+            max_inactivity_time=self.config.state_max_inactivity_time,
         )
 
         # initialize SB3 DRL model

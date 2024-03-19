@@ -13,6 +13,7 @@ class DrlConfig:
     :param episodes: The number of episodes to run
     :param episode_length: The number of steps per episode
     :param state_update_interval: The interval between the state updates in seconds
+    :param state_max_inactivity_time: The maximum time in seconds to wait for the state update. If exceeded, the episode is terminated
     :param hyperparams_cfg: Hyperparameters configuration: either a path to a json gile or a dictionary. Nullable
     :param deterministic: Whether the DRL model should be deterministic
     :param callbacks: Optional list of callbacks for SB3 model given as string aliases. One of 'save_model', 'save_step', 'print_step'. Nullable
@@ -27,6 +28,7 @@ class DrlConfig:
     episodes: int = 30
     episode_length: int = 512
     state_update_interval: float = 1.0
+    state_max_inactivity_time: float = 60.0
     hyperparams_cfg: str | Dict[str, Any] | None = None
     deterministic: bool = False
     callbacks: List[str] | None = None
