@@ -64,17 +64,22 @@ class DrlManager:
         )
 
         # check for CUDA and set up the device
-        if torch.cuda.is_available():
-            self.device = "cuda"
-            curr_dev = torch.cuda.current_device()
-            gpu = torch.cuda.get_device_properties(curr_dev)
-            LOGGER.info(
-                f"INFO: Cuda is ON: found {torch.cuda.device_count()} GPUs available. Using the following GPU"
-                f" {curr_dev} {gpu.name} with {gpu.total_memory / 1e9}Gb of total memory"
-            )
+        if self.config.device is not None and (
+            self.config.device.startswith("cpu") or self.config.device.startswith("cuda")
+        ):
+            self.device = self.config.device
         else:
-            self.device = "cpu"
-            LOGGER.info("INFO: Cuda is OFF: using cpu only\n")
+            if torch.cuda.is_available():
+                self.device = "cuda"
+                curr_dev = torch.cuda.current_device()
+                gpu = torch.cuda.get_device_properties(curr_dev)
+                LOGGER.info(
+                    f"INFO: Cuda is ON: found {torch.cuda.device_count()} GPUs available. Using the following GPU"
+                    f" {curr_dev} {gpu.name} with {gpu.total_memory / 1e9}Gb of total memory"
+                )
+            else:
+                self.device = "cpu"
+                LOGGER.info("INFO: Cuda is OFF: using cpu only\n")
 
         # initialize env
         self.env = DrlEnv(

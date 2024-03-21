@@ -118,14 +118,17 @@ def merge_observations(observations: List[Dict[str, Dict[str, Any]]]) -> Dict[st
     return merged_observations
 
 
-def get_list_average(input_list: List[int | float]) -> int | float:
+def get_list_average(input_list: List[int | float], is_skip_zeroes: bool = False) -> int | float:
     """
     Get average value from list of values
 
     :param input_list: list of values
+    :param is_skip_zeroes: skip zeroes in the list
     :return: average value
     """
-    return sum(input_list) / len(input_list) if len(input_list) > 0 else 0.0
+    if is_skip_zeroes:
+        input_list = [value for value in input_list if value != 0.0]
+    return sum(input_list) / len(input_list) if len(input_list) > 0 else 0
 
 
 def select_n_equidistant_elements_from_list(input_list: List[Any], n: int, cut_percent: int = 0) -> List[Any]:

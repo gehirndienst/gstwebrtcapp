@@ -19,6 +19,7 @@ class DrlConfig:
     :param callbacks: Optional list of callbacks for SB3 model given as string aliases. One of 'save_model', 'save_step', 'print_step'. Nullable
     :param save_model_path: The path to save the DRL model
     :param save_log_path: The path to save the DRL logs
+    :param device: The device to run the DRL model on. Nullable
     :param verbose: The verbosity level. One of 0, 1, 2
     """
 
@@ -34,4 +35,5 @@ class DrlConfig:
     callbacks: List[str] | None = None
     save_model_path: str = './models'
     save_log_path: str = './logs'
+    device: str | None = None
     verbose: int = 1

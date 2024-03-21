@@ -192,9 +192,9 @@ class QoeAhoySeq(RewardFunction):
     def calculate_reward(self, states: Deque[OrderedDict[str, Any]]) -> Tuple[float, Dict[str, Any | float] | None]:
         super().calculate_reward(states)
 
-        # 1. rate: 0...0.2
-        reward_rate = np.log((np.exp(1) - 1) * (get_list_average(self.state["rxGoodput"])) + 1)
-        reward_rate *= 0.2
+        # 1. rate: 0...0.3
+        reward_rate = np.log((np.exp(1) - 1) * (get_list_average(self.state["rxGoodput"], is_skip_zeroes=True)) + 1)
+        reward_rate *= 0.3
 
         # 2. rtt: 0...0.2
         # 2.1. mean for the last N states - current rtt
@@ -248,14 +248,14 @@ class QoeAhoySeq(RewardFunction):
         reward = reward_rate + reward_rtt + reward_plr + reward_jitter + reward_smooth + reward_pli + reward_nack
         reward = np.clip(reward, 0, 1)
         # ! extra cases:
-        # 1. if plr > 20% then reward = 0
-        # 2. if rtt > 500ms then reward = 0
+        # 1. if plr > 25% then reward = 0
+        # 2. if rtt > 750ms then reward = 0
         # 3. if rxRate / txRate < 0.2 then reward = 0
         # 4. if jitter > 250ms then reward = 0
         # 5. if plir > 1% then reward = 0
         if (
-            fraction_loss_rate > 0.2
-            or fraction_rtt > 0.5
+            fraction_loss_rate > 0.25
+            or fraction_rtt > 0.75
             or (
                 get_list_average(self.state["txGoodput"]) > 0
                 and rx_rate / get_list_average(self.state["txGoodput"]) < 0.2

@@ -230,7 +230,7 @@ class ViewerMDP(MDP):
             if not self.last_states:
                 bandwidth = [0.0, 0.0]
             else:
-                bandwidth = [1.0, 1.0]
+                bandwidth = self.last_states[-1]["bandwidth"]
         elif len(bws) == 1:
             bandwidth = [
                 scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
@@ -504,7 +504,7 @@ class ViewerSeqMDP(MDP):
             if not self.last_states:
                 bandwidth = [0.0, 0.0]
             else:
-                bandwidth = [1.0, 1.0]
+                bandwidth = self.last_states[-1]["bandwidth"]
         elif len(bws) == 1:
             bandwidth = [
                 scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),

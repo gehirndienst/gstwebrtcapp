@@ -24,7 +24,7 @@ class DrlCheckpointCallback(CheckpointCallback):
 
     def __init__(
         self,
-        save_freq: int = 5000,
+        save_freq: int = 1000,
         save_path: str = "./models",
         name_prefix: str = "drl_model",
         save_replay_buffer: bool = True,
