@@ -3,7 +3,7 @@ import enum
 import subprocess
 import shlex
 import random
-from typing import List
+from typing import List, Tuple
 
 from utils.base import LOGGER
 
@@ -25,11 +25,11 @@ class NetworkController:
     def __init__(
         self,
         gt_bandwidth: float,  # mbps
-        interval: float = 10.0,  # sec
+        interval: float | Tuple[float, float] = (10.0, 60.0),  # sec
         interface: str = "eth0",
         scenario_weights: List[float] | None = None,
     ) -> None:
-        self.interval = interval
+        self.interval = (interval, interval) if isinstance(interval, float) else interval
         self.gt_bandwidth = gt_bandwidth
         self.interface = interface
         self._update_weights(scenario_weights)
@@ -46,7 +46,7 @@ class NetworkController:
                     self._apply_rule(rule)
                 else:
                     self._apply_rule(self._generate_rule(self._get_scenario()))
-            await asyncio.sleep(self.interval)
+            await asyncio.sleep(random.uniform(*self.interval))
 
     def set_rule(self, rule: str, is_fix: bool = True) -> None:
         self._apply_rule(rule)
