@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import numpy as np
 import time
 from typing import Any, Callable, Dict, List
 
@@ -160,3 +161,54 @@ def select_n_equidistant_elements_from_list(input_list: List[Any], n: int, cut_p
 
         selected_indices.append(len(input_list) - 1)
         return [input_list[i] for i in sorted(selected_indices)]
+
+
+def slice_list_in_intervals(
+    input_list: List[Any],
+    num_intervals: int,
+    intervals_type: str = 'equidistant',
+) -> List[List[Any]]:
+    """
+    Get equidistant or sliding intervals from the input list. Regulated by intervals_type.
+    E.g., [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] with num_intervals = 3
+
+    equidistant -> [[1, 2, 3, 4], [5, 6, 7], [8, 9, 10]]
+
+    sliding -> [[1, 2, 3, 4], [1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
+
+    :param input_list: list of values
+    :param num_intervals: number of intervals
+    :param intervals_type: type of intervals. One of 'equidistant', 'sliding'
+    :return: list of intervals
+    """
+
+    intervals_type = intervals_type.lower() if intervals_type in ['equidistant', 'sliding'] else 'equidistant'
+    intervals = []
+    interval_length = len(input_list) // num_intervals
+    remainder = len(input_list) % num_intervals
+
+    start_index = 0
+    for i in range(num_intervals):
+        end_index = start_index + interval_length + (1 if i < remainder else 0)
+        if intervals_type == 'equidistant':
+            interval_values = input_list[start_index:end_index]
+        else:
+            interval_values = input_list[:end_index]
+        intervals.append(interval_values)
+        start_index = end_index
+
+    return intervals
+
+
+def get_decay_weights(num_weights: int, start_weight: float = 0.4, ratio: float = 0.5) -> np.ndarray:
+    """
+    Get decay weights for the given number of weights, start weight and ratio. Sum of weights is 1.
+
+    :param num_weights: number of weights
+    :param start_weight: start weight
+    :param ratio: ratio
+    :return: decay weights
+    """
+    weights = start_weight * np.power(ratio, np.arange(num_weights))
+    weights /= np.sum(weights)
+    return weights

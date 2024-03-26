@@ -23,6 +23,7 @@ class AgentType(Enum):
     ABSTRACT = "ABSTRACT"
     CC = "CC"
     DRL = "DRL"
+    DRL_OFFLINE = "DRL_OFFLINE"
     RECORDER = "RECORDER"
 
 

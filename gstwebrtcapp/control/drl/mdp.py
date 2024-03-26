@@ -5,7 +5,7 @@ import numpy as np
 from typing import Any, Dict, OrderedDict, Tuple
 
 from control.drl.reward import RewardFunctionFactory
-from utils.base import LOGGER, scale, unscale, merge_observations
+from utils.base import LOGGER, scale, unscale, get_list_average, slice_list_in_intervals
 from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, get_stat_diff_concat
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
@@ -36,14 +36,17 @@ class MDP(metaclass=ABCMeta):
         reward_function_name: str,
         episode_length: int,
         num_observations_for_state: int = 1,
+        is_deliver_all_observations: bool = False,
         state_history_size: int = 10,
         constants: Dict[str, Any] | None = None,
         *args,
         **kwargs,
     ) -> None:
         self.reward_function = RewardFunctionFactory().create_reward_function(reward_function_name)
+        self.reward_params = None
         self.episode_length = episode_length
         self.num_observations_for_state = num_observations_for_state
+        self.is_deliver_all_observations = is_deliver_all_observations
         self.state_history_size = state_history_size
         if constants is not None:
             for key in constants:
@@ -61,6 +64,7 @@ class MDP(metaclass=ABCMeta):
     @abstractmethod
     def reset(self):
         # memento pattern
+        self.reward_params = None
         self.first_ssrc = None
         self.states_made = 0
         self.last_stats = None
@@ -99,8 +103,11 @@ class MDP(metaclass=ABCMeta):
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
         pass
 
+    def update_reward_params(self) -> None:
+        self.reward_params = None
+
     def calculate_reward(self) -> Tuple[float, Dict[str, Any | float] | None]:
-        return self.reward_function.calculate_reward(self.last_states)
+        return self.reward_function.calculate_reward(self.last_states, self.reward_params)
 
     def get_default_reward_parts_dict(self) -> Dict[str, Any | float] | None:
         return dict(zip(self.reward_function.reward_parts, [0.0] * len(self.reward_function.reward_parts)))
@@ -150,6 +157,7 @@ class ViewerMDP(MDP):
         reward_function_name: str,
         episode_length: int,
         num_observations_for_state: int = 1,
+        is_deliver_all_observations: bool = False,
         state_history_size: int = 10,
         constants: Dict[str, Any] | None = None,
     ) -> None:
@@ -157,6 +165,7 @@ class ViewerMDP(MDP):
             reward_function_name,
             episode_length,
             num_observations_for_state,
+            is_deliver_all_observations,
             state_history_size,
             constants,
         )
@@ -403,8 +412,8 @@ class ViewerMDP(MDP):
         )
 
     def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
-        return self.MIN_BITRATE_STREAM_MBPS + (
-            (action + 1) * (self.MAX_BITRATE_STREAM_MBPS - self.MIN_BITRATE_STREAM_MBPS) / 2
+        return self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"] + (
+            (action + 1) * (self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] - self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"]) / 2
         )
 
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
@@ -422,6 +431,7 @@ class ViewerSeqMDP(MDP):
         reward_function_name: str,
         episode_length: int,
         num_observations_for_state: int = 5,
+        is_deliver_all_observations: bool = False,
         state_history_size: int = 10,
         constants: Dict[str, Any] | None = None,
     ) -> None:
@@ -429,6 +439,7 @@ class ViewerSeqMDP(MDP):
             reward_function_name,
             episode_length,
             num_observations_for_state,
+            is_deliver_all_observations,
             state_history_size,
             constants,
         )
@@ -688,10 +699,262 @@ class ViewerSeqMDP(MDP):
         )
 
     def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
-        return self.MIN_BITRATE_STREAM_MBPS + (
-            (action + 1) * (self.MAX_BITRATE_STREAM_MBPS - self.MIN_BITRATE_STREAM_MBPS) / 2
+        return self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"] + (
+            (action + 1) * (self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] - self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"]) / 2
         )
 
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
         # here we have only bitrate decisions that come as a 1-size np array in mbps (check create_action_space)
         return {"bitrate": self.convert_to_unscaled_action(action)[0] * 1000}
+
+
+class ViewerSeqOfflineMDP(MDP):
+    '''
+    This MDP takes VIEWER (aka BROWSER) sequential stats processed for offline DRL delivered by GStreamer.
+    '''
+
+    def __init__(
+        self,
+        reward_function_name: str,
+        episode_length: int,
+        num_observations_for_state: int = 5,
+        is_deliver_all_observations: bool = True,
+        state_history_size: int = 10,
+        constants: Dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            reward_function_name,
+            episode_length,
+            num_observations_for_state,
+            is_deliver_all_observations,
+            state_history_size,
+            constants,
+        )
+
+        # scale with d3rlpy scaler
+        self.is_scaled = False
+
+        # default
+        self.obs_filter = [
+            GstWebRTCStatsType.RTP_OUTBOUND_STREAM,
+            GstWebRTCStatsType.RTP_INBOUND_STREAM,
+            GstWebRTCStatsType.ICE_CANDIDATE_PAIR,
+        ]
+
+        self.min_delay = 0.0
+
+        self.reset()
+
+    def reset(self):
+        super().reset()
+        self.delays = []
+
+    def create_observation_space(self) -> spaces.Dict:
+        shape = (self.num_observations_for_state,)
+        return spaces.Dict(
+            {
+                "00_RECV_RATE": spaces.Box(
+                    low=0,
+                    high=self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] * 1e6,
+                    shape=shape,
+                    dtype=np.float32,
+                ),  # in bps
+                "03_QUEUING_DELAY": spaces.Box(
+                    low=0, high=self.CONSTANTS["MAX_DELAY_SEC"] * 1000, shape=shape, dtype=np.float32
+                ),  # in ms
+                "04_DELAY": spaces.Box(
+                    low=-200, high=self.CONSTANTS["MAX_DELAY_SEC"] * 1000, shape=shape, dtype=np.float32
+                ),  # -200 is substracted in the training data
+                "05_MIN_SEEN_DELAY": spaces.Box(
+                    low=0, high=self.CONSTANTS["MAX_DELAY_SEC"] * 1000, shape=shape, dtype=np.float32
+                ),
+                "07_DELAY_MIN_DIFF": spaces.Box(
+                    low=0, high=self.CONSTANTS["MAX_DELAY_SEC"] * 1000, shape=shape, dtype=np.float32
+                ),
+                "09_PKT_JITTER": spaces.Box(
+                    low=0, high=self.CONSTANTS["MAX_DELAY_SEC"] * 1000, shape=shape, dtype=np.float32
+                ),
+                "10_PKT_LOSS_RATIO": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+            }
+        )
+
+    def create_action_space(self) -> spaces.Space:
+        # basic AS uses only bitrate
+        return spaces.Box(
+            low=self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"] * 1e6,
+            high=self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] * 1e6,
+            shape=(1,),
+            dtype=np.float32,
+        )
+
+    def make_default_state(self) -> OrderedDict[str, Any]:
+        def_val = 0.0 if self.num_observations_for_state == 1 else [0.0] * self.num_observations_for_state
+        return collections.OrderedDict(
+            {
+                "00_RECV_RATE": def_val,
+                "03_QUEUING_DELAY": def_val,
+                "04_DELAY": def_val,
+                "05_MIN_SEEN_DELAY": def_val,
+                "07_DELAY_MIN_DIFF": def_val,
+                "09_PKT_JITTER": def_val,
+                "10_PKT_LOSS_RATIO": def_val,
+            }
+        )
+
+    def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
+        super().make_state(stats)
+
+        # get dicts with needed stats
+        rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
+        rtp_inbound = find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
+        ice_candidate_pair = find_stat(stats, GstWebRTCStatsType.ICE_CANDIDATE_PAIR)
+        if not rtp_outbound or not rtp_inbound or not ice_candidate_pair:
+            return self.make_default_state()
+
+        # get previous state for calculating fractional values
+        last_rtp_outbound = (
+            find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM) if self.last_stats is not None else None
+        )
+        last_rtp_inbound = (
+            find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM) if self.last_stats is not None else None
+        )
+        self.last_stats = stats
+
+        if self.first_ssrc is None:
+            # FIXME: make first ever ssrc to be the privileged one and take stats only from it
+            self.first_ssrc = rtp_inbound[0]["ssrc"][0]
+
+        for i, rtp_inbound_ssrc in enumerate(rtp_inbound):
+            if rtp_inbound_ssrc["ssrc"][0] == self.first_ssrc:
+                last_rtp_inbound_ssrc = last_rtp_inbound[i] if last_rtp_inbound is not None else None
+                last_rtp_outbound_ssrc = last_rtp_outbound[0] if last_rtp_outbound is not None else None
+
+                # get needed stats
+                packets_sent_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "packets-sent")
+                ts_diff_sec = [
+                    ts / 1000 for ts in get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "timestamp")
+                ]
+
+                # 00_RECV_RATE
+                rx_bytes_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-received")
+                rx_bits_diff = [r * 8 for r in rx_bytes_diff]
+                rx_rates = [r / ts if ts > 0 else 0.0 for r, ts in zip(rx_bits_diff, ts_diff_sec)]
+                # NOTE: it is important to reverse all the lists to get the correct order of observations
+                rx_rates.reverse()
+                rx_rates_final = [
+                    get_list_average(mi, is_skip_zeroes=True)
+                    for mi in slice_list_in_intervals(rx_rates, self.num_observations_for_state, 'sliding')
+                ]
+
+                # 04_DELAY
+                delays_raw_ms = [
+                    ntp_short_format_to_seconds(rtt) * 1000 / 2  # ms
+                    for rtt in rtp_inbound[i]["rb-round-trip"]  # roughly assuming d = rtt / 2
+                ]
+                delays_raw_ms.reverse()
+                self.delays.extend(delays_raw_ms)
+                delays_shifted = [d - 200 for d in delays_raw_ms]
+                delays_final = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(delays_shifted, self.num_observations_for_state, 'sliding')
+                ]
+
+                # 05_MIN_SEEN_DELAY
+                min_seen_delays = []
+                for d in delays_raw_ms:
+                    if self.min_delay == 0.0:
+                        self.min_delay = d
+                    if d < self.min_delay and d > 0:
+                        self.min_delay = d
+                    min_seen_delays.append(self.min_delay)
+
+                min_seen_delays_final = [
+                    min(mi)
+                    for mi in slice_list_in_intervals(min_seen_delays, self.num_observations_for_state, 'sliding')
+                ]
+
+                # 03_QUEUING_DELAY
+                av_delays_raw = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(delays_raw_ms, self.num_observations_for_state, 'sliding')
+                ]
+                queuing_delays_final = [
+                    av_delay - min_seen_delay for av_delay, min_seen_delay in zip(av_delays_raw, min_seen_delays_final)
+                ]
+
+                # 07_DELAY_MIN_DIFF
+                delay_min_diffs = [
+                    av_delay - min(delays_raw)
+                    for av_delay, delays_raw in zip(
+                        av_delays_raw,
+                        slice_list_in_intervals(delays_raw_ms, self.num_observations_for_state, 'sliding'),
+                    )
+                ]
+
+                # 09_PKT_JITTER
+                jitters_raw = [
+                    clock_units_to_seconds(j, rtp_outbound[0]["clock-rate"][0]) * 1000  # ms
+                    for j in rtp_inbound[i]["rb-jitter"]
+                ]
+                jitters_raw.reverse()
+                jitters_final = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(jitters_raw, self.num_observations_for_state, 'sliding')
+                ]
+
+                # 10_PKT_LOSS_RATIO
+                packets_sent_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "packets-sent")
+                rb_packetslost_diff = get_stat_diff_concat(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
+                loss_rates = [
+                    lost / (sent + lost) if sent + lost > 0 else 0.0
+                    for lost, sent in zip(rb_packetslost_diff, packets_sent_diff)
+                ]
+                loss_rates.reverse()
+                loss_rates_final = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(loss_rates, self.num_observations_for_state, 'sliding')
+                ]
+
+                # form the final state
+                state = collections.OrderedDict(
+                    {
+                        "00_RECV_RATE": rx_rates_final,
+                        "03_QUEUING_DELAY": queuing_delays_final,
+                        "04_DELAY": delays_final,
+                        "05_MIN_SEEN_DELAY": min_seen_delays_final,
+                        "07_DELAY_MIN_DIFF": delay_min_diffs,
+                        "09_PKT_JITTER": jitters_final,
+                        "10_PKT_LOSS_RATIO": loss_rates_final,
+                    }
+                )
+
+                self.update_reward_params()
+
+                self.last_states.append(state)
+                return state
+
+        LOGGER.warning("WARNING: Drl Agent.make_state: no ssrc stats found")
+        return self.make_default_state()
+
+    def convert_to_unscaled_state(self, state: OrderedDict[str, Any]) -> OrderedDict[str, Any]:
+        return state
+
+    def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
+        # action comes usually as np array in bps
+        if isinstance(action, np.ndarray):
+            a = action[0] / 1e6  # mbps
+            a_final = min(self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"], max(self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], a))
+            return a_final * 1e3  # kbps
+        else:
+            a = action / 1e6
+            a_final = min(self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"], max(self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], a))
+            return a_final * 1e3
+
+    def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
+        return {"bitrate": self.convert_to_unscaled_action(action)}
+
+    def update_reward_params(self) -> None:
+        self.reward_params = {
+            "constants": self.CONSTANTS,
+            "max_delay": max(self.delays) if self.delays else 0.0,
+        }

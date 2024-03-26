@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 from typing import Any, Deque, Dict, OrderedDict, Tuple
 
-from utils.base import get_list_average
+from utils.base import get_list_average, get_decay_weights
 
 
 class RewardFunction(metaclass=ABCMeta):
@@ -12,7 +12,9 @@ class RewardFunction(metaclass=ABCMeta):
         self.reward_parts = None
 
     @abstractmethod
-    def calculate_reward(self, states: Deque[OrderedDict[str, Any]]) -> Tuple[float, Dict[str, Any | float] | None]:
+    def calculate_reward(
+        self, states: Deque[OrderedDict[str, Any]], params: Dict[str, Any] | None = None
+    ) -> Tuple[float, Dict[str, Any | float] | None]:
         if len(states) == 0:
             return 0.0, dict(zip(self.reward_parts, [0.0] * len(self.reward_parts)))
         elif len(states) == 1:
@@ -28,7 +30,9 @@ class QoePaper(RewardFunction):
         super().__init__(*args, **kwargs)
         self.reward_parts = ["rew", "rate", "rtt", "plr", "jit", "smt", "pli", "nack"]
 
-    def calculate_reward(self, states: Deque[OrderedDict[str, Any]]) -> Tuple[float, Dict[str, Any | float] | None]:
+    def calculate_reward(
+        self, states: Deque[OrderedDict[str, Any]], params: Dict[str, Any] | None = None
+    ) -> Tuple[float, Dict[str, Any | float] | None]:
         super().calculate_reward(states)
 
         # 1. rate
@@ -96,8 +100,10 @@ class QoeAhoy(RewardFunction):
         super().__init__(*args, **kwargs)
         self.reward_parts = ["rew", "rate", "rtt", "plr", "jit", "smt", "pli", "nack"]
 
-    def calculate_reward(self, states: Deque[OrderedDict[str, Any]]) -> Tuple[float, Dict[str, Any | float] | None]:
-        super().calculate_reward(states)
+    def calculate_reward(
+        self, states: Deque[OrderedDict[str, Any]], params: Dict[str, Any] | None = None
+    ) -> Tuple[float, Dict[str, Any | float] | None]:
+        super().calculate_reward(states, params)
 
         # 1. rate: 0...0.2
         reward_rate = np.log((np.exp(1) - 1) * (self.state["rxGoodput"]) + 1)
@@ -189,12 +195,14 @@ class QoeAhoySeq(RewardFunction):
         super().__init__(*args, **kwargs)
         self.reward_parts = ["rew", "rate", "rtt", "plr", "jit", "smt", "pli", "nack"]
 
-    def calculate_reward(self, states: Deque[OrderedDict[str, Any]]) -> Tuple[float, Dict[str, Any | float] | None]:
-        super().calculate_reward(states)
+    def calculate_reward(
+        self, states: Deque[OrderedDict[str, Any]], params: Dict[str, Any] | None = None
+    ) -> Tuple[float, Dict[str, Any | float] | None]:
+        super().calculate_reward(states, params)
 
-        # 1. rate: 0...0.3
+        # 1. rate: 0...0.25
         reward_rate = np.log((np.exp(1) - 1) * (get_list_average(self.state["rxGoodput"], is_skip_zeroes=True)) + 1)
-        reward_rate *= 0.3
+        reward_rate *= 0.25
 
         # 2. rtt: 0...0.2
         # 2.1. mean for the last N states - current rtt
@@ -213,11 +221,11 @@ class QoeAhoySeq(RewardFunction):
         reward_rtt = 0.4 + final_sum_rtt
         reward_rtt *= 0.5
 
-        # 3. plr: 0...0.2
+        # 3. plr: 0...0.25
         # plr is not so often but very deadly, so penalize more. Set 20% to be the most critical
         fraction_loss_rate = get_list_average(self.state["fractionLossRate"])
         reward_plr = max(0, 1 - 5 * fraction_loss_rate)
-        reward_plr *= 0.2
+        reward_plr *= 0.25
 
         # 4. jitter: 0...0.1
         # max 250 ms, more than that is very bad, 10 ms jitter is considered to be acceptable
@@ -282,11 +290,68 @@ class QoeAhoySeq(RewardFunction):
         )
 
 
+class QoeOffline(RewardFunction):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.reward_parts = ["rew"]
+
+    def calculate_reward(
+        self, states: Deque[OrderedDict[str, Any]], params: Dict[str, Any] | None = None
+    ) -> Tuple[float, Dict[str, Any | float] | None]:
+        super().calculate_reward(states, params)
+
+        # 1. rate: 0...0.3
+        rewards_rate = []
+        max_rate = params["constants"]["MAX_BITRATE_STREAM_MBPS"] * 1e6  # bps
+        for rate in self.state["00_RECV_RATE"]:
+            rewards_rate.append(np.log((np.exp(1) - 1) * (min(1, rate / max_rate) + 1)))
+
+        # 2. delay: 0...0.3
+        rewards_delay = []
+        delays = self.state["04_DELAY"]
+        min_seen_delays = self.state["05_MIN_SEEN_DELAY"]
+        for i, delay in enumerate(delays):
+            delay += 200  # add a substracted base delay of 200 ms to have an absolute value
+            # d_max - d / d_max - d_min
+            max_delay = params["max_delay"]
+            rewards_delay.append(
+                (max_delay - delay) / (max_delay - min_seen_delays[i]) if max_delay != min_seen_delays[i] else 1.0
+            )
+
+        # 3. plr: 0...0.3
+        # plr is not so often but very deadly, so penalize more. Set 20% to be the most critical
+        rewards_plr = []
+        for plr in self.state["10_PKT_LOSS_RATIO"]:
+            rewards_plr.append(1 - plr)
+
+        # 4. jitter: 0...0.1
+        rewards_jitter = []
+        for jit in self.state["09_PKT_JITTER"]:
+            rewards_jitter.append(-0.04 * np.sqrt(min(625, jit)) + 1)
+
+        # combine with weights 0.3, 0.3, 0.3, 0.1
+        rewards = []
+        for i in range(len(rewards_rate)):
+            rewards.append(
+                0.3 * rewards_rate[i] + 0.3 * rewards_delay[i] + 0.3 * rewards_plr[i] + 0.1 * rewards_jitter[i]
+            )
+
+        # get decay weights
+        decay_weights = get_decay_weights(5)  # num obs = 5
+        reward = 0.0
+        for i in range(len(rewards)):
+            reward += decay_weights[i] * rewards[i]
+        reward *= 5
+
+        return reward, dict(zip(self.reward_parts, [reward]))
+
+
 class RewardFunctionFactory:
     reward_functions = {
         "qoe_paper": QoePaper,
         "qoe_ahoy": QoeAhoy,
         "qoe_ahoy_seq": QoeAhoySeq,
+        "qoe_offline": QoeOffline,
         # add more reward function classes as needed
     }
 
