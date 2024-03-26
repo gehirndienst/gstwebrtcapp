@@ -16,7 +16,7 @@ DEFAULT_BIN_PIPELINE = '''
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate !
     capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 !
     x264enc name=encoder tune=zerolatency threads=8 key-int-max=60 aud=true cabac=1 bframes=2 vbv-buf-capacity=120 ! 
-    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1350 !
+    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1250 !
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
 '''
 # for internal reolink camera that streams 4k in hevc
@@ -25,7 +25,7 @@ DEFAULT_H265_IN_WEBRTCBIN_H264_OUT_PIPELINE = '''
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph265depay ! h265parse ! avdec_h265 ! videoconvert ! videoscale ! videorate !
     capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! 
     x264enc name=encoder tune=zerolatency threads=8 key-int-max=60 aud=true cabac=1 bframes=2 vbv-buf-capacity=120 !
-    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1350 ! 
+    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1250 ! 
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126, rtcp-fb-goog-remb=(boolean)true, rtcp-fb-transport-cc=(boolean)true" ! webrtc.
 '''
 
@@ -100,7 +100,7 @@ DEFAULT_BIN_CUDA_PIPELINE = '''
     rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
     capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! 
     nvh264enc name=encoder preset=low-latency-hq gop-size=60 rc-mode=cbr-ld-hq aud=true bframes=2 zerolatency=true ! 
-    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1350 ! 
+    rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1250 ! 
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
 '''
 
