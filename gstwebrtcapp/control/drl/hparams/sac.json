@@ -1,0 +1,18 @@
+{
+    "policy": "MultiInputPolicy",
+    "batch_size": 128,
+    "learning_rate": 7.3e-4,
+    "buffer_size": 300000,
+    "ent_coef": "auto",
+    "gamma": 0.98,
+    "tau": 0.02,
+    "train_freq": 64,
+    "gradient_steps": 64,
+    "learning_starts": 10000,
+    "use_sde": true, 
+    "policy_kwargs": {
+        "log_std_init": -1, 
+        "activation_fn": "relu",
+        "net_arch": [512, 256, 256]
+    }
+}

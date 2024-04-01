@@ -1,0 +1,20 @@
+{
+    "policy": "MultiInputPolicy",
+    "n_steps": 256,
+    "batch_size": 64,
+    "gamma": 0.99,
+    "learning_rate": 0.0003,
+    "n_epochs": 10,
+    "gae_lambda": 0.95,
+    "clip_range": 0.1,
+    "ent_coef": 0.01,
+    "policy_kwargs": {
+        "log_std_init": -1, 
+        "ortho_init": false, 
+        "activation_fn": "relu", 
+        "net_arch": {
+            "pi": [256, 256], 
+            "vf": [256, 256]
+        }
+    }
+}
