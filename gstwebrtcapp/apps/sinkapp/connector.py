@@ -25,6 +25,7 @@ from gi.repository import Gst
 from apps.app import GstWebRTCAppConfig
 from apps.sinkapp.app import SinkApp
 from control.agent import Agent
+from media.preset import get_video_preset
 from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from network.controller import NetworkController
 from utils.base import LOGGER, async_wait_for_condition
@@ -178,6 +179,8 @@ class SinkConnector:
                                 self._app.set_resolution(msg[action])
                             case "framerate":
                                 self._app.set_framerate(msg[action])
+                            case "preset":
+                                self._app.set_preset(get_video_preset(msg[action]))
                             case _:
                                 LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
 

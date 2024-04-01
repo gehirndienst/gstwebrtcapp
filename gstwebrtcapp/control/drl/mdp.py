@@ -5,6 +5,7 @@ import numpy as np
 from typing import Any, Dict, OrderedDict, Tuple
 
 from control.drl.reward import RewardFunctionFactory
+from media.preset import VideoPreset, VideoPresets
 from utils.base import LOGGER, scale, unscale, get_list_average, slice_list_in_intervals
 from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, get_stat_diff_concat
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
@@ -428,8 +429,8 @@ class ViewerSeqMDP(MDP):
 
     def __init__(
         self,
-        reward_function_name: str,
-        episode_length: int,
+        reward_function_name: str = "qoe_ahoy_seq",
+        episode_length: int = 256,
         num_observations_for_state: int = 5,
         is_deliver_all_observations: bool = True,
         state_history_size: int = 10,
@@ -505,7 +506,7 @@ class ViewerSeqMDP(MDP):
 
     def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
         super().make_state(stats)
-        
+
         # get gcc bandiwdth
         bws = []
         while not self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.gcc].empty():
@@ -527,7 +528,7 @@ class ViewerSeqMDP(MDP):
                 scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
                 scale(bws[-1], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
             ]
-            
+
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
         rtp_inbound = find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
@@ -753,15 +754,15 @@ class ViewerSeqMDP(MDP):
         return {"bitrate": self.convert_to_unscaled_action(action)[0] * 1000}
 
 
-class ViewerSeqNoBaselineMDP(MDP):
+class ViewerSeqNoBaselineMDP(ViewerSeqMDP):
     '''
     This MDP takes VIEWER (aka BROWSER) sequential stats (stacked observations) w/o GCC baseline delivered by GStreamer.
     '''
 
     def __init__(
         self,
-        reward_function_name: str,
-        episode_length: int,
+        reward_function_name: str = "qoe_ahoy_seq",
+        episode_length: int = 256,
         num_observations_for_state: int = 5,
         is_deliver_all_observations: bool = True,
         state_history_size: int = 10,
@@ -775,22 +776,6 @@ class ViewerSeqNoBaselineMDP(MDP):
             state_history_size,
             constants,
         )
-
-        # obs are scaled to [0, 1], actions are scaled to [-1, 1]
-        self.is_scaled = True
-
-        # filter obs only with needed stats in
-        self.obs_filter = [
-            GstWebRTCStatsType.RTP_OUTBOUND_STREAM,
-            GstWebRTCStatsType.RTP_INBOUND_STREAM,
-            GstWebRTCStatsType.ICE_CANDIDATE_PAIR,
-        ]
-
-        self.reset()
-
-    def reset(self):
-        super().reset()
-        self.rtts = []
 
     def create_observation_space(self) -> spaces.Dict:
         # normalized to [0, 1]
@@ -810,10 +795,6 @@ class ViewerSeqNoBaselineMDP(MDP):
                 "txGoodput": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
             }
         )
-
-    def create_action_space(self) -> spaces.Space:
-        # basic AS uses only bitrate, normalized to [-1, 1]
-        return spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
 
     def make_default_state(self) -> OrderedDict[str, Any]:
         def_val = 0.0 if self.num_observations_for_state == 1 else [0.0] * self.num_observations_for_state
@@ -1046,14 +1027,40 @@ class ViewerSeqNoBaselineMDP(MDP):
             else state
         )
 
-    def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
-        return self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"] + (
-            (action + 1) * (self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] - self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"]) / 2
+
+class ViewerSeqDiscreteMDP(ViewerSeqMDP):
+    '''
+    This MDP takes VIEWER (aka BROWSER) sequential stats (stacked observations) and outputs precooked video presets from a discrete action space.
+    '''
+
+    def __init__(
+        self,
+        reward_function_name: str = "qoe_ahoy_seq",
+        episode_length: int = 256,
+        num_observations_for_state: int = 5,
+        is_deliver_all_observations: bool = True,
+        state_history_size: int = 10,
+        constants: Dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            reward_function_name,
+            episode_length,
+            num_observations_for_state,
+            is_deliver_all_observations,
+            state_history_size,
+            constants,
         )
 
-    def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
-        # here we have only bitrate decisions that come as a 1-size np array in mbps (check create_action_space)
-        return {"bitrate": self.convert_to_unscaled_action(action)[0] * 1000}
+    def create_action_space(self) -> spaces.Space:
+        # discrete AS uses precooked video presets
+        return spaces.Discrete(len(VideoPresets))
+
+    def convert_to_unscaled_action(self, action: np.int64) -> int:
+        # from int64 to int
+        return int(action)
+
+    def pack_action_for_controller(self, action: np.int64) -> Dict[str, int]:
+        return {"preset": self.convert_to_unscaled_action(action)}
 
 
 class ViewerSeqOfflineMDP(MDP):

@@ -115,11 +115,11 @@ class DrlEnv(Env):
                     and self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.stats].empty()
                 )
 
-        # 15% of the observations are selected to be cut to prevent the influence of the last action
+        # 25% of the observations are selected to be cut to prevent the influence of the last action
         if not self.mdp.is_deliver_all_observations:
-            obs_list = select_n_equidistant_elements_from_list(obs_list, self.mdp.num_observations_for_state, 15)
+            obs_list = select_n_equidistant_elements_from_list(obs_list, self.mdp.num_observations_for_state, 25)
         else:
-            obs_list = cut_first_elements_in_list(obs_list, 15, self.mdp.num_observations_for_state)
+            obs_list = cut_first_elements_in_list(obs_list, 25, self.mdp.num_observations_for_state)
         final_obs_dict = merge_observations(obs_list) if len(obs_list) > 1 else obs_list[0]
         return final_obs_dict
 
@@ -150,7 +150,7 @@ class DrlEnv(Env):
             "step": self.steps,
             "episode": self.episodes,
             "action": (
-                self.last_action[0]
+                (self.last_action[0] if isinstance(self.last_action, np.ndarray) else self.last_action)
                 if self.last_action is not None
                 else (
                     None

@@ -88,6 +88,9 @@ class AhoyApp(GstWebRTCApp):
             self.source.set_property("location", self.video_url)
             LOGGER.info(f"OK: video location is set to {self.video_url}")
 
+        # set delayed caps for raw_capsfilter to safely change resolution and framerate on the fly
+        self.raw_capsfilter.set_property("caps-change-mode", "delayed")
+
         # set gcc estimator if settings are provided
         if self.gcc_settings is not None:
             self.set_gcc()

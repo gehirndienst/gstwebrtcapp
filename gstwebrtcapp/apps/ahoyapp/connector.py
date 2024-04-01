@@ -30,6 +30,7 @@ from gi.repository import GstWebRTC
 from apps.app import GstWebRTCAppConfig
 from apps.ahoyapp.app import AhoyApp
 from control.agent import Agent
+from media.preset import get_video_preset
 from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from network.controller import NetworkController
 from utils.base import LOGGER, wait_for_condition, async_wait_for_condition
@@ -377,6 +378,8 @@ class AhoyConnector:
                                 self._app.set_resolution(msg[action])
                             case "framerate":
                                 self._app.set_framerate(msg[action])
+                            case "preset":
+                                self._app.set_preset(get_video_preset(msg[action]))
                             case _:
                                 LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
         LOGGER.info(f"OK: ACTION HANDLER IS OFF!")

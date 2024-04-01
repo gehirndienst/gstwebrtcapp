@@ -15,7 +15,6 @@ License:
 from abc import ABCMeta, abstractmethod
 import asyncio
 from dataclasses import dataclass, field
-import enum
 import json
 import re
 from typing import Any, Callable, Dict, List
@@ -28,6 +27,7 @@ from gi.repository import Gst
 from gi.repository import GstWebRTC
 
 from apps.pipelines import DEFAULT_BIN_PIPELINE
+from media.preset import VideoPreset
 from utils.base import LOGGER, GSTWEBRTCAPP_EXCEPTION, wait_for_condition
 from utils.gst import DEFAULT_GCC_SETTINGS, get_gst_encoder_name
 
@@ -153,6 +153,20 @@ class GstWebRTCApp(metaclass=ABCMeta):
         :param int percentage: FEC percentage of the video.
         """
         pass
+
+    def set_preset(self, preset: VideoPreset) -> None:
+        """
+        Set the video preset.
+
+        :param VideoPreset preset: Video preset.
+        """
+        LOGGER.info(f"ACTION: set video preset to {preset.name}")
+        if preset.width != self.resolution["width"] or preset.height != self.resolution["height"]:
+            self.set_resolution(preset.width, preset.height)
+        if preset.framerate != self.framerate:
+            self.set_framerate(preset.framerate)
+        if preset.bitrate != self.bitrate:
+            self.set_bitrate(preset.bitrate)
 
     def is_webrtc_ready(self) -> bool:
         return self.webrtcbin is not None
