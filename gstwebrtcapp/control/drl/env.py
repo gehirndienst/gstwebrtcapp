@@ -8,7 +8,7 @@ from typing import Any, Dict, List, OrderedDict
 
 from control.drl.mdp import MDP
 from message.client import MqttPair
-from utils.base import LOGGER, merge_observations, select_n_equidistant_elements_from_list
+from utils.base import LOGGER, merge_observations, select_n_equidistant_elements_from_list, cut_first_elements_in_list
 
 
 class DrlEnv(Env):
@@ -115,9 +115,11 @@ class DrlEnv(Env):
                     and self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.stats].empty()
                 )
 
+        # 15% of the observations are selected to be cut to prevent the influence of the last action
         if not self.mdp.is_deliver_all_observations:
-            # 15% of the observations are selected to be cut to prevent the influence of the last action
             obs_list = select_n_equidistant_elements_from_list(obs_list, self.mdp.num_observations_for_state, 15)
+        else:
+            obs_list = cut_first_elements_in_list(obs_list, 15, self.mdp.num_observations_for_state)
         final_obs_dict = merge_observations(obs_list) if len(obs_list) > 1 else obs_list[0]
         return final_obs_dict
 

@@ -431,7 +431,7 @@ class ViewerSeqMDP(MDP):
         reward_function_name: str,
         episode_length: int,
         num_observations_for_state: int = 5,
-        is_deliver_all_observations: bool = False,
+        is_deliver_all_observations: bool = True,
         state_history_size: int = 10,
         constants: Dict[str, Any] | None = None,
     ) -> None:
@@ -505,6 +505,7 @@ class ViewerSeqMDP(MDP):
 
     def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
         super().make_state(stats)
+        
         # get gcc bandiwdth
         bws = []
         while not self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.gcc].empty():
@@ -526,6 +527,7 @@ class ViewerSeqMDP(MDP):
                 scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
                 scale(bws[-1], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
             ]
+            
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
         rtp_inbound = find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
@@ -561,34 +563,55 @@ class ViewerSeqMDP(MDP):
                 # loss rates
                 # 1. fraction loss rate
                 rb_packetslost_diff = get_stat_diff_concat(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
-                fraction_loss_rates = [
+                fraction_loss_rates_raw = [
                     lost / (sent + lost) if sent + lost > 0 else 0.0
                     for lost, sent in zip(rb_packetslost_diff, packets_sent_diff)
                 ]
+                fraction_loss_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(fraction_loss_rates_raw, self.num_observations_for_state)
+                ]
+
                 # 7. global loss rate
-                loss_rates = [
+                loss_rates_raw = [
                     lost / (sent + lost) if sent + lost > 0 else 0.0
                     for lost, sent in zip(rtp_inbound[i]["rb-packetslost"], rtp_outbound[0]["packets-sent"])
                 ]
 
+                loss_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(loss_rates_raw, self.num_observations_for_state)
+                ]
+
                 # 2. fraction nack rate
                 recv_nack_count_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "nack-count")
-                fraction_nack_rates = [
+                fraction_nack_rates_raw = [
                     nack / recv if recv > 0 else 0.0 for nack, recv in zip(recv_nack_count_diff, packets_recv_diff)
+                ]
+                fraction_nack_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(fraction_nack_rates_raw, self.num_observations_for_state)
                 ]
 
                 # 3. fraction pli rate
                 recv_pli_count_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "pli-count")
-                fraction_pli_rates = [
+                fraction_pli_rates_raw = [
                     pli / recv if recv > 0 else 0.0 for pli, recv in zip(recv_pli_count_diff, packets_recv_diff)
+                ]
+                fraction_pli_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(fraction_pli_rates_raw, self.num_observations_for_state)
                 ]
 
                 # rtts: RTT comes in NTP short format
-                rtts = [
-                    ntp_short_format_to_seconds(rtt) / self.CONSTANTS["MAX_DELAY_SEC"]
+                rtts_raw = [
+                    scale(ntp_short_format_to_seconds(rtt), 0, self.CONSTANTS["MAX_DELAY_SEC"])
                     for rtt in rtp_inbound[i]["rb-round-trip"]
                 ]
-                self.rtts.extend(rtts)
+                self.rtts.extend(rtts_raw)
+                rtts = [
+                    get_list_average(mi) for mi in slice_list_in_intervals(rtts_raw, self.num_observations_for_state)
+                ]
 
                 # 4. fraction queueing rtt
                 fraction_queueing_rtts = [rtt - min(self.rtts) if len(self.rtts) > 0 else 0.0 for rtt in rtts]
@@ -598,15 +621,21 @@ class ViewerSeqMDP(MDP):
                 rtt_std = np.std(self.rtts) if len(self.rtts) > 0 else 0.0
 
                 # 6. jitter: comes in clock units
-                interarrival_jitters = [
-                    clock_units_to_seconds(j, rtp_outbound[0]["clock-rate"][0]) / self.CONSTANTS["MAX_DELAY_SEC"]
+                interarrival_jitters_raw = [
+                    scale(
+                        clock_units_to_seconds(j, rtp_outbound[0]["clock-rate"][0]), 0, self.CONSTANTS["MAX_DELAY_SEC"]
+                    )
                     for j in rtp_inbound[i]["rb-jitter"]
+                ]
+                interarrival_jitters = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(interarrival_jitters_raw, self.num_observations_for_state)
                 ]
 
                 # 11. rx rate
                 try:
                     bitrate_recvs = ice_candidate_pair[0]["bitrate-recv"]
-                    rx_rates = [
+                    rx_rates_raw = [
                         scale(
                             b / 1000000,
                             self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
@@ -614,19 +643,27 @@ class ViewerSeqMDP(MDP):
                         )
                         for b in bitrate_recvs
                     ]
+                    rx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(rx_rates_raw, self.num_observations_for_state)
+                    ]
                 except KeyError:
                     rx_bytes_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-received")
                     rx_mbits_diff = [r * 8 / 1000000 for r in rx_bytes_diff]
                     rx_rates = [r / ts if ts > 0 else 0.0 for r, ts in zip(rx_mbits_diff, ts_diff_sec)]
-                    rx_rates = [
+                    rx_rates_raw = [
                         scale(r, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"])
                         for r in rx_rates
+                    ]
+                    rx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(rx_rates_raw, self.num_observations_for_state)
                     ]
 
                 # 12. tx rate
                 try:
                     bitrate_sents = ice_candidate_pair[0]["bitrate-sent"]
-                    tx_rates = [
+                    tx_rates_raw = [
                         scale(
                             b / 1000000,
                             self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
@@ -634,13 +671,21 @@ class ViewerSeqMDP(MDP):
                         )
                         for b in bitrate_sents
                     ]
+                    tx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(tx_rates_raw, self.num_observations_for_state)
+                    ]
                 except KeyError:
                     tx_bytes_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-sent")
                     tx_mbits_diff = [t * 8 / 1000000 for t in tx_bytes_diff]
                     tx_rates = [t / ts if ts > 0 else 0.0 for t, ts in zip(tx_mbits_diff, ts_diff_sec)]
-                    tx_rates = [
+                    tx_rates_raw = [
                         scale(t, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"])
                         for t in tx_rates
+                    ]
+                    tx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(tx_rates_raw, self.num_observations_for_state)
                     ]
 
                 # form the final state
@@ -675,6 +720,309 @@ class ViewerSeqMDP(MDP):
                         unscale(s, self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"])
                         for s in state["bandwidth"]
                     ],
+                    "fractionLossRate": state["fractionLossRate"],
+                    "fractionNackRate": state["fractionNackRate"],
+                    "fractionPliRate": state["fractionPliRate"],
+                    "fractionQueueingRtt": [fqr * self.MAX_DELAY_SEC for fqr in state["fractionQueueingRtt"]],
+                    "fractionRtt": [fr * self.MAX_DELAY_SEC for fr in state["fractionRtt"]],
+                    "interarrivalRttJitter": [irj * self.MAX_DELAY_SEC for irj in state["interarrivalRttJitter"]],
+                    "lossRate": state["lossRate"],
+                    "rttMean": state["rttMean"] * self.MAX_DELAY_SEC,
+                    "rttStd": state["rttStd"] * self.MAX_DELAY_SEC,
+                    "rxGoodput": [
+                        unscale(r, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"])
+                        for r in state["rxGoodput"]
+                    ],
+                    "txGoodput": [
+                        unscale(t, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"])
+                        for t in state["txGoodput"]
+                    ],
+                }
+            )
+            if self.is_scaled
+            else state
+        )
+
+    def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
+        return self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"] + (
+            (action + 1) * (self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] - self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"]) / 2
+        )
+
+    def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
+        # here we have only bitrate decisions that come as a 1-size np array in mbps (check create_action_space)
+        return {"bitrate": self.convert_to_unscaled_action(action)[0] * 1000}
+
+
+class ViewerSeqNoBaselineMDP(MDP):
+    '''
+    This MDP takes VIEWER (aka BROWSER) sequential stats (stacked observations) w/o GCC baseline delivered by GStreamer.
+    '''
+
+    def __init__(
+        self,
+        reward_function_name: str,
+        episode_length: int,
+        num_observations_for_state: int = 5,
+        is_deliver_all_observations: bool = True,
+        state_history_size: int = 10,
+        constants: Dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            reward_function_name,
+            episode_length,
+            num_observations_for_state,
+            is_deliver_all_observations,
+            state_history_size,
+            constants,
+        )
+
+        # obs are scaled to [0, 1], actions are scaled to [-1, 1]
+        self.is_scaled = True
+
+        # filter obs only with needed stats in
+        self.obs_filter = [
+            GstWebRTCStatsType.RTP_OUTBOUND_STREAM,
+            GstWebRTCStatsType.RTP_INBOUND_STREAM,
+            GstWebRTCStatsType.ICE_CANDIDATE_PAIR,
+        ]
+
+        self.reset()
+
+    def reset(self):
+        super().reset()
+        self.rtts = []
+
+    def create_observation_space(self) -> spaces.Dict:
+        # normalized to [0, 1]
+        shape = (self.num_observations_for_state,)
+        return spaces.Dict(
+            {
+                "fractionLossRate": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "fractionNackRate": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "fractionPliRate": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "fractionQueueingRtt": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "fractionRtt": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "interarrivalRttJitter": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "lossRate": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "rttMean": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "rttStd": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
+                "rxGoodput": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+                "txGoodput": spaces.Box(low=0, high=1, shape=shape, dtype=np.float32),
+            }
+        )
+
+    def create_action_space(self) -> spaces.Space:
+        # basic AS uses only bitrate, normalized to [-1, 1]
+        return spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
+
+    def make_default_state(self) -> OrderedDict[str, Any]:
+        def_val = 0.0 if self.num_observations_for_state == 1 else [0.0] * self.num_observations_for_state
+        return collections.OrderedDict(
+            {
+                "fractionLossRate": def_val,
+                "fractionNackRate": def_val,
+                "fractionPliRate": def_val,
+                "fractionQueueingRtt": def_val,
+                "fractionRtt": def_val,
+                "interarrivalRttJitter": def_val,
+                "lossRate": def_val,
+                "rttMean": 0.0,
+                "rttStd": 0.0,
+                "rxGoodput": def_val,
+                "txGoodput": def_val,
+            }
+        )
+
+    def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
+        super().make_state(stats)
+
+        # get dicts with needed stats
+        rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
+        rtp_inbound = find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
+        ice_candidate_pair = find_stat(stats, GstWebRTCStatsType.ICE_CANDIDATE_PAIR)
+        if not rtp_outbound or not rtp_inbound or not ice_candidate_pair:
+            return self.make_default_state()
+
+        # get previous state for calculating fractional values
+        last_rtp_outbound = (
+            find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM) if self.last_stats is not None else None
+        )
+        last_rtp_inbound = (
+            find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM) if self.last_stats is not None else None
+        )
+        self.last_stats = stats
+
+        if self.first_ssrc is None:
+            # FIXME: make first ever ssrc to be the privileged one and take stats only from it
+            self.first_ssrc = rtp_inbound[0]["ssrc"][0]
+
+        for i, rtp_inbound_ssrc in enumerate(rtp_inbound):
+            if rtp_inbound_ssrc["ssrc"][0] == self.first_ssrc:
+                last_rtp_inbound_ssrc = last_rtp_inbound[i] if last_rtp_inbound is not None else None
+                last_rtp_outbound_ssrc = last_rtp_outbound[0] if last_rtp_outbound is not None else None
+
+                # get needed stats
+                packets_sent_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "packets-sent")
+                packets_recv_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "packets-received")
+                ts_diff_sec = [
+                    ts / 1000 for ts in get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "timestamp")
+                ]
+
+                # loss rates
+                # 1. fraction loss rate
+                rb_packetslost_diff = get_stat_diff_concat(rtp_inbound[i], last_rtp_inbound_ssrc, "rb-packetslost")
+                fraction_loss_rates_raw = [
+                    lost / (sent + lost) if sent + lost > 0 else 0.0
+                    for lost, sent in zip(rb_packetslost_diff, packets_sent_diff)
+                ]
+                fraction_loss_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(fraction_loss_rates_raw, self.num_observations_for_state)
+                ]
+
+                # 7. global loss rate
+                loss_rates_raw = [
+                    lost / (sent + lost) if sent + lost > 0 else 0.0
+                    for lost, sent in zip(rtp_inbound[i]["rb-packetslost"], rtp_outbound[0]["packets-sent"])
+                ]
+
+                loss_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(loss_rates_raw, self.num_observations_for_state)
+                ]
+
+                # 2. fraction nack rate
+                recv_nack_count_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "nack-count")
+                fraction_nack_rates_raw = [
+                    nack / recv if recv > 0 else 0.0 for nack, recv in zip(recv_nack_count_diff, packets_recv_diff)
+                ]
+                fraction_nack_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(fraction_nack_rates_raw, self.num_observations_for_state)
+                ]
+
+                # 3. fraction pli rate
+                recv_pli_count_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "pli-count")
+                fraction_pli_rates_raw = [
+                    pli / recv if recv > 0 else 0.0 for pli, recv in zip(recv_pli_count_diff, packets_recv_diff)
+                ]
+                fraction_pli_rates = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(fraction_pli_rates_raw, self.num_observations_for_state)
+                ]
+
+                # rtts: RTT comes in NTP short format
+                rtts_raw = [
+                    scale(ntp_short_format_to_seconds(rtt), 0, self.CONSTANTS["MAX_DELAY_SEC"])
+                    for rtt in rtp_inbound[i]["rb-round-trip"]
+                ]
+                self.rtts.extend(rtts_raw)
+                rtts = [
+                    get_list_average(mi) for mi in slice_list_in_intervals(rtts_raw, self.num_observations_for_state)
+                ]
+
+                # 4. fraction queueing rtt
+                fraction_queueing_rtts = [rtt - min(self.rtts) if len(self.rtts) > 0 else 0.0 for rtt in rtts]
+                # 9. mean rtt
+                rtt_mean = np.mean(self.rtts) if len(self.rtts) > 0 else 0.0
+                # 10. std rtt
+                rtt_std = np.std(self.rtts) if len(self.rtts) > 0 else 0.0
+
+                # 6. jitter: comes in clock units
+                interarrival_jitters_raw = [
+                    scale(
+                        clock_units_to_seconds(j, rtp_outbound[0]["clock-rate"][0]), 0, self.CONSTANTS["MAX_DELAY_SEC"]
+                    )
+                    for j in rtp_inbound[i]["rb-jitter"]
+                ]
+                interarrival_jitters = [
+                    get_list_average(mi)
+                    for mi in slice_list_in_intervals(interarrival_jitters_raw, self.num_observations_for_state)
+                ]
+
+                # 11. rx rate
+                try:
+                    bitrate_recvs = ice_candidate_pair[0]["bitrate-recv"]
+                    rx_rates_raw = [
+                        scale(
+                            b / 1000000,
+                            self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
+                            self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"],
+                        )
+                        for b in bitrate_recvs
+                    ]
+                    rx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(rx_rates_raw, self.num_observations_for_state)
+                    ]
+                except KeyError:
+                    rx_bytes_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-received")
+                    rx_mbits_diff = [r * 8 / 1000000 for r in rx_bytes_diff]
+                    rx_rates = [r / ts if ts > 0 else 0.0 for r, ts in zip(rx_mbits_diff, ts_diff_sec)]
+                    rx_rates_raw = [
+                        scale(r, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"])
+                        for r in rx_rates
+                    ]
+                    rx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(rx_rates_raw, self.num_observations_for_state)
+                    ]
+
+                # 12. tx rate
+                try:
+                    bitrate_sents = ice_candidate_pair[0]["bitrate-sent"]
+                    tx_rates_raw = [
+                        scale(
+                            b / 1000000,
+                            self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"],
+                            self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"],
+                        )
+                        for b in bitrate_sents
+                    ]
+                    tx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(tx_rates_raw, self.num_observations_for_state)
+                    ]
+                except KeyError:
+                    tx_bytes_diff = get_stat_diff_concat(rtp_outbound[0], last_rtp_outbound_ssrc, "bytes-sent")
+                    tx_mbits_diff = [t * 8 / 1000000 for t in tx_bytes_diff]
+                    tx_rates = [t / ts if ts > 0 else 0.0 for t, ts in zip(tx_mbits_diff, ts_diff_sec)]
+                    tx_rates_raw = [
+                        scale(t, self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"], self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"])
+                        for t in tx_rates
+                    ]
+                    tx_rates = [
+                        get_list_average(mi, is_skip_zeroes=True)
+                        for mi in slice_list_in_intervals(tx_rates_raw, self.num_observations_for_state)
+                    ]
+
+                # form the final state
+                state = collections.OrderedDict(
+                    {
+                        "fractionLossRate": fraction_loss_rates,
+                        "fractionNackRate": fraction_nack_rates,
+                        "fractionPliRate": fraction_pli_rates,
+                        "fractionQueueingRtt": fraction_queueing_rtts,
+                        "fractionRtt": rtts,
+                        "interarrivalRttJitter": interarrival_jitters,
+                        "lossRate": loss_rates,
+                        "rttMean": rtt_mean,
+                        "rttStd": rtt_std,
+                        "rxGoodput": rx_rates,
+                        "txGoodput": tx_rates,
+                    }
+                )
+
+                self.last_states.append(state)
+                return state
+
+        LOGGER.warning("WARNING: Drl Agent: ViewerMDP: make_state: no ssrc stats found")
+        return self.make_default_state()
+
+    def convert_to_unscaled_state(self, state: OrderedDict[str, Any]) -> OrderedDict[str, Any]:
+        return (
+            collections.OrderedDict(
+                {
                     "fractionLossRate": state["fractionLossRate"],
                     "fractionNackRate": state["fractionNackRate"],
                     "fractionPliRate": state["fractionPliRate"],

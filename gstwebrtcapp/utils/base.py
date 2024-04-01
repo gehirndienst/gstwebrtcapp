@@ -212,3 +212,22 @@ def get_decay_weights(num_weights: int, start_weight: float = 0.4, ratio: float 
     weights = start_weight * np.power(ratio, np.arange(num_weights))
     weights /= np.sum(weights)
     return weights
+
+
+def cut_first_elements_in_list(
+    input_list: List[Any],
+    cut_percent: int = 0,
+    min_remaining_elements: int = -1,
+) -> List[Any]:
+    """
+    Cuts elements from the beginning of the list by the given cut percent.
+    :param input_list: list of values
+    :param cut_percent: percentage of elements to delete from the beginning
+    :param min_remaining_elements: minimum number of elements to remain in the list. Default is -1 (no minimum)
+    :return: list of values with deleted elements
+    """
+    num_elements_to_delete = int(len(input_list) * cut_percent / 100)
+    if min_remaining_elements > 0:
+        num_elements_to_delete = min(num_elements_to_delete, len(input_list) - min_remaining_elements)
+    del input_list[:num_elements_to_delete]
+    return input_list
