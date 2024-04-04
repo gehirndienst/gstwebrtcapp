@@ -28,25 +28,31 @@ class NetworkController:
         interval: float | Tuple[float, float] = (10.0, 60.0),  # sec
         interface: str = "eth0",
         scenario_weights: List[float] | None = None,
+        additional_rule_str: str = "",  # either --delay ..., or --loss ...
     ) -> None:
         self.interval = (interval, interval) if isinstance(interval, float) else interval
         self.gt_bandwidth = gt_bandwidth
         self.interface = interface
         self._update_weights(scenario_weights)
+        self.additional_rule_str = additional_rule_str
 
         self.rules = []
         self.current_rule = ""
+        self.current_cmd = ""
         self.is_fix_current_rule = False
 
     async def update_network_rule(self) -> None:
-        while True:
-            if not self.is_fix_current_rule:
-                if self.rules:
-                    rule = self.rules.pop(0)
-                    self._apply_rule(rule)
-                else:
-                    self._apply_rule(self._generate_rule(self._get_scenario()))
-            await asyncio.sleep(random.uniform(*self.interval))
+        try:
+            while True:
+                if not self.is_fix_current_rule:
+                    if self.rules:
+                        rule = self.rules.pop(0)
+                        self._apply_rule(rule)
+                    else:
+                        self._apply_rule(self._generate_rule(self._get_scenario()))
+                await asyncio.sleep(random.uniform(*self.interval))
+        except asyncio.CancelledError:
+            self.reset_rule()
 
     def set_rule(self, rule: str, is_fix: bool = True) -> None:
         self._apply_rule(rule)
@@ -55,10 +61,11 @@ class NetworkController:
     def reset_rule(self) -> None:
         self._delete_rules()
         self.current_rule = ""
+        self.current_cmd = ""
         self.is_fix_current_rule = False
 
-    def generate_rules(self, count: int, weights: List[float] | None) -> None:
-        if weights:
+    def generate_rules(self, count: int, weights: List[float] | None = None) -> None:
+        if weights is not None:
             self._update_weights(weights)
         self.rules = []
         for _ in range(count):
@@ -67,8 +74,9 @@ class NetworkController:
 
     def _apply_rule(self, rule: str) -> None:
         self._delete_rules()
-        subprocess.run(shlex.split(self._make_tcset_cmd(rule)))
-        LOGGER.info(f"NetworkController: Rule applied, tcset cmd: --{rule}")
+        self._make_tcset_cmd(rule)
+        subprocess.run(shlex.split(self.current_cmd))
+        LOGGER.info(f"NetworkController: Rule applied, tcset cmd: {self.current_cmd}")
 
     def _delete_rules(self) -> None:
         subprocess.run(shlex.split(f"tcdel {self.interface} --all"))
@@ -102,6 +110,6 @@ class NetworkController:
         else:
             LOGGER.warning("NetworkController: Given scenario weights are not valid, ignore given weights.")
 
-    def _make_tcset_cmd(self, rule: str) -> str:
+    def _make_tcset_cmd(self, rule: str) -> None:
         self.current_rule = rule
-        return f"tcset {self.interface} --{self.current_rule}"
+        self.current_cmd = f"tcset {self.interface} --{self.current_rule} {self.additional_rule_str}"
