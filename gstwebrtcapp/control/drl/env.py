@@ -8,7 +8,13 @@ from typing import Any, Dict, List, OrderedDict
 
 from control.drl.mdp import MDP
 from message.client import MqttPair
-from utils.base import LOGGER, merge_observations, select_n_equidistant_elements_from_list, cut_first_elements_in_list
+from utils.base import (
+    LOGGER,
+    sleep_until_condition_with_intervals,
+    merge_observations,
+    select_n_equidistant_elements_from_list,
+    cut_first_elements_in_list,
+)
 
 
 class DrlEnv(Env):
@@ -83,18 +89,16 @@ class DrlEnv(Env):
         return self.state, {}
 
     def _get_observation(self) -> Dict[str, Any] | None:
-        time.sleep(self.state_update_interval)
+        sleep_until_condition_with_intervals(10, self.state_update_interval, lambda: self.is_finished)
         if self.is_finished:
             # this could be triggered e.g., by agent.stop() call or by DrlBreakCallback
-            LOGGER.info("WARNING: Interrupted by a finish signal, closing the env...")
-            self.state = self._get_initial_state()
-            self.reward = 0.0
+            self._on_finish()
             return None
 
         time_inactivity_starts = time.time()
         is_collected = False
         obs_list = []
-        while not is_collected:
+        while not is_collected and not self.is_finished:
             stats = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.stats)
             if stats is None:
                 if time.time() - time_inactivity_starts > self.max_inactivity_time:
@@ -120,8 +124,19 @@ class DrlEnv(Env):
             obs_list = select_n_equidistant_elements_from_list(obs_list, self.mdp.num_observations_for_state, 25)
         else:
             obs_list = cut_first_elements_in_list(obs_list, 25, self.mdp.num_observations_for_state)
-        final_obs_dict = merge_observations(obs_list) if len(obs_list) > 1 else obs_list[0]
-        return final_obs_dict
+
+        if len(obs_list) > 1:
+            # merge observations from list[dict[str, dict]] to dict[str, dict[list]]
+            return merge_observations(obs_list)
+        elif len(obs_list) == 1:
+            # old MDP versions consume unpacked observation of type dict[str, Any]
+            return obs_list[0]
+        else:
+            if self.is_finished:
+                self._on_finish()
+                return None
+            else:
+                raise Exception("ERROR: Env: no observations were collected but the env is not finished")
 
     def _dict_to_gym_space_sample(self, state_dict: Dict[str, Any]) -> OrderedDict[str, Any]:
         tuples = []
@@ -143,6 +158,11 @@ class DrlEnv(Env):
 
     def _get_initial_state(self) -> OrderedDict[str, Any]:
         return self._dict_to_gym_space_sample(self.mdp.make_default_state())
+
+    def _on_finish(self) -> None:
+        LOGGER.info("WARNING: Interrupted by a finish signal, closing the env...")
+        self.state = self._get_initial_state()
+        self.reward = 0.0
 
     def get_step_info(self) -> Dict[str, Any]:
         # get all env variables after step execution in a pretty-printing way. Called externally by the callback.

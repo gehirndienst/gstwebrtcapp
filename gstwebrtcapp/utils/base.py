@@ -18,7 +18,7 @@ class GSTWEBRTCAPP_EXCEPTION(Exception):
         return f"{self.args[0]}"
 
 
-# general utils
+# TIME
 def wait_for_condition(
     condition_func: Callable[[], bool],
     timeout_sec: int,
@@ -63,6 +63,27 @@ async def async_wait_for_condition(
     return True
 
 
+def sleep_until_condition_with_intervals(
+    num_intervals: int,
+    sleeping_time_sec: float,
+    condition_func: Callable[[], bool],
+) -> bool:
+    """
+    Sleep until condition_func returns True or num_intervals is reached
+    :param num_intervals: number of intervals
+    :param sleeping_time_sec: sleeping time in seconds
+    :param condition_func: callable that returns bool
+    :return: True if condition_func returned True before num_intervals is reached, False otherwise
+    """
+    tick_interval_sec = sleeping_time_sec / num_intervals
+    for _ in range(num_intervals):
+        time.sleep(tick_interval_sec)
+        if condition_func():
+            return True
+    return False
+
+
+# SCALING
 def scale(val: int | float, min: int | float, max: int | float) -> int | float:
     """
     Scale value to 0,1 range
@@ -97,6 +118,7 @@ def unscale(scaled_val: int | float, min: int | float, max: int | float) -> int 
         return scaled_val * (max - min) + min if min < max else min
 
 
+# LIST OPERATIONS
 def merge_observations(observations: List[Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, List[Any]]]:
     """
     Merge observations from different agents or several observations from one agent
