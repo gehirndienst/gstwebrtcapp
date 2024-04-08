@@ -84,8 +84,6 @@ class AhoyConnector:
         self.agent = agent
         self.agent_thread = None
         self.mqtt_config = mqtt_config
-        if self.agent is not None:
-            self.agent.mqtt_config = mqtt_config
         self.mqtts = MqttPair(
             publisher=MqttPublisher(self.mqtt_config),
             subscriber=MqttSubscriber(self.mqtt_config),

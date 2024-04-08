@@ -43,7 +43,7 @@ class MqttClient(metaclass=ABCMeta):
         self,
         config: MqttConfig = MqttConfig(""),
     ) -> None:
-        self.id = config.id if config.id else secrets.token_hex(4)
+        self.id = config.id + "_" + secrets.token_hex(4)
         self.broker_host = config.broker_host
         self.broker_port = config.broker_port
         self.keepalive = config.keepalive
