@@ -124,7 +124,7 @@ RUN pip install aiortc uvloop
 
 # INSTALL DRL STACK
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-RUN pip install stable-baselines3 sb3-contrib gymnasium tensorboard seaborn jupyter optuna swig
+RUN pip install stable-baselines3 sb3-contrib d3rlpy gymnasium tensorboard seaborn jupyter optuna swig
 
 # INSTALL NETWORKING STUFF
 RUN apt-get update -y && apt-get install -y --fix-missing net-tools iputils-ping iproute2 openconnect && \
@@ -138,8 +138,9 @@ RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # INSTALL GST RUST PLUGINS
-RUN curl -sL https://deb.nodesource.com/setup_16.x | bash -s -- -y
-RUN apt-get update && apt-get install -y --fix-missing npm rust-src libnice-dev libpango1.0-dev libcairo2-dev webpack
+RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -s -- -y && apt-get install -y nodejs
+RUN npm install webpack
+RUN apt-get update && apt-get install -y rust-src libnice-dev libpango1.0-dev libcairo2-dev
 WORKDIR /opt
 RUN git clone --branch 0.11.3+fixup https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs.git && cd gst-plugins-rs && cargo build
 ENV GST_PLUGIN_PATH="/opt/gst-plugins-rs/target/debug:${GST_PLUGIN_PATH}"
