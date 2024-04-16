@@ -38,6 +38,7 @@ class SinkConnector:
         server: str = "ws://127.0.0.1:8443",
         pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
         agent: Agent | None = None,
+        feed_name: str = "gst-stream",
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
     ):
@@ -59,6 +60,7 @@ class SinkConnector:
             subscriber=MqttSubscriber(self.mqtt_config),
         )
         self.mqtts_threads = None
+        self.feed_name = feed_name
         self.network_controller = network_controller
 
         self._app = None
@@ -71,6 +73,7 @@ class SinkConnector:
             self._app = SinkApp(self.pipeline_config)
             if self._app is None:
                 raise Exception("SinkApp object is None!")
+            self._app.webrtcsink.set_property("meta", Gst.Structure.new_from_string(f"meta,name={self.feed_name}"))
             self.is_running = True
         except Exception as e:
             LOGGER.error(f"ERROR: Failed to create SinkApp object, reason:\n {str(e)}")
