@@ -278,8 +278,18 @@ class SinkApp(GstWebRTCApp):
     ## set gcc algorithm in passive mode and save its estimated bitrate on each notification
     def _cb_add_gcc(self, _, __):
         LOGGER.info("OK: adding gcc estimator...")
-        self.gcc.set_property("min-bitrate", DEFAULT_GCC_SETTINGS["min-bitrate"])
-        self.gcc.set_property("max-bitrate", DEFAULT_GCC_SETTINGS["max-bitrate"])
+        min_bitrate = (
+            self.gcc_settings["min-bitrate"]
+            if "min-bitrate" in self.gcc_settings
+            else DEFAULT_GCC_SETTINGS["min-bitrate"]
+        )
+        max_bitrate = (
+            self.gcc_settings["max-bitrate"]
+            if "max-bitrate" in self.gcc_settings
+            else DEFAULT_GCC_SETTINGS["max-bitrate"]
+        )
+        self.gcc.set_property("min-bitrate", min_bitrate)
+        self.gcc.set_property("max-bitrate", max_bitrate)
         self.gcc.set_property("estimated-bitrate", self.bitrate * 1000)
         self.gcc.connect("notify::estimated-bitrate", self.on_estimated_bitrate_changed)
         return self.gcc

@@ -19,6 +19,12 @@ class MqttGstWebrtcAppTopics:
 
 
 @dataclass
+class MqttExternalEstimationTopics:
+    bandwidth: str = ""
+    rtt: str = ""
+
+
+@dataclass
 class MqttConfig:
     id: str = ""
     broker_host: str = "0.0.0.0"
@@ -28,6 +34,7 @@ class MqttConfig:
     password: str | None = None
     is_tls: bool = False
     topics: MqttGstWebrtcAppTopics = field(default_factory=lambda: MqttGstWebrtcAppTopics)
+    external_topics: MqttExternalEstimationTopics | None = None
 
 
 @dataclass
@@ -43,7 +50,7 @@ class MqttClient(metaclass=ABCMeta):
         self,
         config: MqttConfig = MqttConfig(""),
     ) -> None:
-        self.id = config.id + "_" + secrets.token_hex(4)
+        self.id = config.id + ("_" if config.id else "") + secrets.token_hex(4)
         self.broker_host = config.broker_host
         self.broker_port = config.broker_port
         self.keepalive = config.keepalive
@@ -51,6 +58,7 @@ class MqttClient(metaclass=ABCMeta):
         self.password = config.password
         self.is_tls = config.is_tls
         self.topics = config.topics
+        self.external_topics = config.external_topics
 
         self.message_queue = None
         self.client = None
@@ -94,14 +102,15 @@ class MqttPublisher(MqttClient):
     ) -> None:
         super().__init__(config)
 
-    def publish(self, topic: str, msg: str) -> None:
-        wait_for_condition(lambda: self.is_running, 10)
+    def publish(self, topic: str, msg: str, id: str = "") -> None:
+        if not self.is_running:
+            wait_for_condition(lambda: self.is_running, 10)
         self.client.publish(
             topic,
             json.dumps(
                 {
                     'timestamp': datetime.now().strftime("%Y-%m-%d-%H_%M_%S_%f")[:-3],
-                    'id': self.id,
+                    'id': id or self.id,
                     'msg': msg,
                 }
             ),
@@ -118,6 +127,11 @@ class MqttSubscriber(MqttClient):
         self.message_queues: Dict[str, asyncio.Queue] = {}
         for f in fields(self.topics):
             self.message_queues[getattr(self.topics, f.name)] = asyncio.Queue()
+        if self.external_topics:
+            for f in fields(self.external_topics):
+                ext_topic = getattr(self.external_topics, f.name)
+                if ext_topic:
+                    self.message_queues[ext_topic] = asyncio.Queue()
 
     def on_message(self, _, __, msg) -> None:
         payload = json.loads(msg.payload.decode('utf8'))
@@ -132,10 +146,11 @@ class MqttSubscriber(MqttClient):
         self.message_queues[msg.topic].put_nowait(mqtt_message)
         LOGGER.debug(f"Received message: {payload}")
 
-    def subscribe(self, topics: List[str]) -> None:
-        wait_for_condition(lambda: self.is_running, 10)
+    def subscribe(self, topics: List[str], qos: int = 1) -> None:
+        if not self.is_running:
+            wait_for_condition(lambda: self.is_running, 10)
         for topic in topics:
-            self.client.subscribe(topic, qos=1)
+            self.client.subscribe(topic, qos=qos)
             self.client.on_message = self.on_message
             LOGGER.info(f"OK: MQTT subscriber {self.id} has successfully subscribed to {topic}")
 
