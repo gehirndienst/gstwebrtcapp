@@ -1,10 +1,10 @@
 import asyncio
 import logging
 import numpy as np
+import pandas as pd
 import time
 from typing import Any, Callable, Dict, List, Tuple
 
-import pandas as pd
 
 # logger
 LOGGER = logging

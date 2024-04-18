@@ -60,7 +60,6 @@ class CsvViewerRecorderAgent(Agent):
                             self._save_stats_to_csv()
 
     def _fetch_stats(self) -> List[MqttMessage] | None:
-        time.sleep(self.stats_update_interval)
         time_inactivity_starts = time.time()
         stats = []
         while not self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.stats].empty():
