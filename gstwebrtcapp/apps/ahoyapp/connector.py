@@ -17,6 +17,7 @@ from datetime import datetime
 import json
 import requests
 import threading
+from typing import List
 
 import gi
 
@@ -57,7 +58,7 @@ class AhoyConnector:
         server: str,
         api_key: str,
         pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
-        agent: Agent | None = None,
+        agents: List[Agent] | None = None,
         feed_name: str = "gstreamerwebrtcapp",
         signalling_channel_name: str = "control",
         stats_channel_name: str = "telemetry",
@@ -81,8 +82,8 @@ class AhoyConnector:
         self.webrtcbin_ice_connection_state = GstWebRTC.WebRTCICEConnectionState.NEW
         self.pc_out_ice_connection_state = "new"
 
-        self.agent = agent
-        self.agent_thread = None
+        self.agents = agents
+        self.agent_threads = []
         self.mqtt_config = mqtt_config
         self.mqtts = MqttPair(
             publisher=MqttPublisher(self.mqtt_config),
@@ -408,10 +409,12 @@ class AhoyConnector:
             actions_task = asyncio.create_task(self.handle_actions())
             be_task = asyncio.create_task(self.handle_bandwidth_estimations())
             tasks = [signalling_task, pipeline_task, webrtcbin_stats_task, actions_task, be_task]
-            if self.agent is not None:
-                # start agents thread
-                self.agent_thread = threading.Thread(target=self.agent.run, args=(True,), daemon=True)
-                self.agent_thread.start()
+            if self.agents is not None:
+                # start agent threads
+                for agent in self.agents:
+                    agent_thread = threading.Thread(target=agent.run, args=(True,), daemon=True)
+                    agent_thread.start()
+                    self.agent_threads.append(agent_thread)
             if self.network_controller is not None:
                 # start network controller's task
                 network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
@@ -430,9 +433,8 @@ class AhoyConnector:
                     pass
                 for task in tasks:
                     task.cancel()
-                if self.agent_thread is not None:
-                    self.agent.stop()
-                    self.agent_thread.join()
+                if self.agent_threads:
+                    self.terminate_agents()
                 self.mqtts.publisher.stop()
                 self.mqtts.subscriber.stop()
                 for t in self.mqtts_threads:
@@ -450,9 +452,8 @@ class AhoyConnector:
                     pass
                 for task in tasks:
                     task.cancel()
-                if self.agent_thread is not None:
-                    self.agent.stop()
-                    self.agent_thread.join()
+                if self.agent_threads:
+                    self.terminate_agents()
                 self.mqtts.publisher.stop()
                 self.mqtts.subscriber.stop()
                 for t in self.mqtts_threads:
@@ -469,9 +470,8 @@ class AhoyConnector:
             self.terminate_webrtc_coro()
             for task in tasks:
                 task.cancel()
-            if self.agent_thread is not None:
-                self.agent.stop()
-                self.agent_thread.join()
+            if self.agent_threads:
+                self.terminate_agents()
             self.mqtts.publisher.stop()
             self.mqtts.subscriber.stop()
             for t in self.mqtts_threads:
@@ -494,6 +494,14 @@ class AhoyConnector:
                 self._app.terminate_pipeline()
         if self.webrtc_coro_control_task is not None:
             self.webrtc_coro_control_task.cancel()
+
+    def terminate_agents(self) -> None:
+        if self.agent_threads:
+            for agent in self.agents:
+                agent.stop()
+            for agent_thread in self.agent_threads:
+                if agent_thread:
+                    agent_thread.join()
 
     @property
     def app(self) -> AhoyApp | None:

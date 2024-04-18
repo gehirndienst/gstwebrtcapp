@@ -16,6 +16,7 @@ from collections import deque
 import json
 import re
 import threading
+from typing import List
 import gi
 
 
@@ -37,7 +38,7 @@ class SinkConnector:
         self,
         server: str = "ws://127.0.0.1:8443",
         pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
-        agent: Agent | None = None,
+        agents: List[Agent] | None = None,
         feed_name: str = "gst-stream",
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
@@ -52,8 +53,8 @@ class SinkConnector:
                 r'(webrtcsink[^\n]*)', fr'\1 signaller::uri={server}', self.pipeline_config.pipeline_str
             )
 
-        self.agent = agent
-        self.agent_thread = None
+        self.agents = agents
+        self.agent_threads = []
         self.mqtt_config = mqtt_config
         self.mqtts = MqttPair(
             publisher=MqttPublisher(self.mqtt_config),
@@ -95,10 +96,12 @@ class SinkConnector:
             actions_task = asyncio.create_task(self.handle_actions())
             be_task = asyncio.create_task(self.handle_bandwidth_estimations())
             tasks = [pipeline_task, post_init_pipeline_task, webrtcsink_stats_task, actions_task, be_task]
-            if self.agent is not None:
-                # start agents thread
-                self.agent_thread = threading.Thread(target=self.agent.run, args=(True,), daemon=True)
-                self.agent_thread.start()
+            if self.agents is not None:
+                # start agent threads
+                for agent in self.agents:
+                    agent_thread = threading.Thread(target=agent.run, args=(True,), daemon=True)
+                    agent_thread.start()
+                    self.agent_threads.append(agent_thread)
             if self.network_controller is not None:
                 # start network controller's task
                 network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
@@ -110,9 +113,8 @@ class SinkConnector:
             self.terminate_webrtc_coro()
             for task in tasks:
                 task.cancel()
-            if self.agent_thread is not None:
-                self.agent.stop()
-                self.agent_thread.join()
+            if self.agent_threads:
+                self.terminate_agents()
             self.mqtts.publisher.stop()
             self.mqtts.subscriber.stop()
             for t in self.mqtts_threads:
@@ -137,6 +139,14 @@ class SinkConnector:
                 self._app.send_termination_message_to_bus()
             else:
                 self._app.terminate_pipeline()
+
+    def terminate_agents(self) -> None:
+        if self.agent_threads:
+            for agent in self.agents:
+                agent.stop()
+            for agent_thread in self.agent_threads:
+                if agent_thread:
+                    agent_thread.join()
 
     async def handle_webrtcsink_stats(self) -> None:
         LOGGER.info(f"OK: WEBRTCSINK STATS HANDLER IS ON -- ready to check for stats")

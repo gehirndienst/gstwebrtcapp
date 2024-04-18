@@ -44,6 +44,7 @@ class NetworkController:
         self.warmup = warmup
 
         self.log_path = log_path
+        self.csv_file = None
         self.csv_handler = None
         self.csv_writer = None
 
@@ -71,6 +72,8 @@ class NetworkController:
                 self.reset_rule()
                 if self.csv_handler is not None:
                     self.csv_handler.close()
+                    self.csv_handler = None
+                    self.csv_writer = None
 
     def set_rule(self, rule: str, is_fix: bool = True) -> None:
         self._apply_rule(rule)
@@ -157,11 +160,12 @@ class NetworkController:
         datetime_now = datetime.now().strftime("%Y-%m-%d-%H_%M_%S_%f")[:-3]
         if self.csv_handler is None:
             os.makedirs(self.log_path, exist_ok=True)
-            filename = os.path.join(self.log_path, f"network_rules_{datetime_now}.csv")
+            if self.csv_file is None:
+                self.csv_file = os.path.join(self.log_path, f"network_rules_{datetime_now}.csv")
             header = ["timestamp", "rule", "additional_rule"]
-            self.csv_handler = open(filename, mode="a", newline="\n")
+            self.csv_handler = open(self.csv_file, mode="a", newline="\n")
             self.csv_writer = csv.DictWriter(self.csv_handler, fieldnames=header)
-            if os.stat(filename).st_size == 0:
+            if os.stat(self.csv_file).st_size == 0:
                 self.csv_writer.writeheader()
             self.csv_handler.flush()
         else:
