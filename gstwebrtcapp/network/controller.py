@@ -1,4 +1,6 @@
 import asyncio
+import csv
+from datetime import datetime
 import enum
 import os
 import subprocess
@@ -31,6 +33,7 @@ class NetworkController:
         interface: str = "eth0",
         scenario_weights: List[float] | None = None,
         additional_rule_str: str = "",  # either --delay ..., or --loss ...
+        log_path: str | None = None,
         warmup: float = 10.0,
     ) -> None:
         self.interval = (interval, interval) if isinstance(interval, float) else interval
@@ -39,6 +42,10 @@ class NetworkController:
         self._update_weights(scenario_weights)
         self.additional_rule_str = additional_rule_str
         self.warmup = warmup
+
+        self.log_path = log_path
+        self.csv_handler = None
+        self.csv_writer = None
 
         self.rules = []
         self.current_rule = ""
@@ -56,10 +63,14 @@ class NetworkController:
                         self._apply_rule(rule)
                     else:
                         self._apply_rule(self._generate_rule(self._get_scenario()))
+                if self.log_path is not None:
+                    self._save_rule_to_csv()
                 await asyncio.sleep(random.uniform(*self.interval))
             except asyncio.CancelledError:
                 cancelled = True
                 self.reset_rule()
+                if self.csv_handler is not None:
+                    self.csv_handler.close()
 
     def set_rule(self, rule: str, is_fix: bool = True) -> None:
         self._apply_rule(rule)
@@ -141,3 +152,22 @@ class NetworkController:
     def _make_tcset_cmd(self, rule: str) -> None:
         self.current_rule = rule
         self.current_cmd = f"tcset {self.interface} --{self.current_rule} {self.additional_rule_str}"
+
+    def _save_rule_to_csv(self) -> None:
+        datetime_now = datetime.now().strftime("%Y-%m-%d-%H_%M_%S_%f")[:-3]
+        if self.csv_handler is None:
+            os.makedirs(self.log_path, exist_ok=True)
+            filename = os.path.join(self.log_path, f"network_rules_{datetime_now}.csv")
+            header = ["timestamp", "rule", "additional_rule"]
+            self.csv_handler = open(filename, mode="a", newline="\n")
+            self.csv_writer = csv.DictWriter(self.csv_handler, fieldnames=header)
+            if os.stat(filename).st_size == 0:
+                self.csv_writer.writeheader()
+            self.csv_handler.flush()
+        else:
+            row = {
+                "timestamp": datetime_now,
+                "rule": f"--{self.current_rule}",
+                "additional_rule": self.additional_rule_str,
+            }
+            self.csv_writer.writerow(row)
