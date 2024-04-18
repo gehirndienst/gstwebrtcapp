@@ -2,7 +2,9 @@ import asyncio
 import logging
 import numpy as np
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
+
+import pandas as pd
 
 # logger
 LOGGER = logging
@@ -253,3 +255,42 @@ def cut_first_elements_in_list(
         num_elements_to_delete = min(num_elements_to_delete, len(input_list) - min_remaining_elements)
     del input_list[:num_elements_to_delete]
     return input_list
+
+
+def extract_network_traces_from_csv(csv_file: str, aggregation_interval: int = 1) -> Tuple[List[float], float]:
+    """
+    Extract aggregated bandwidth values from the csv file. The original interval is assumed to be 1 second.
+    Csv file should contain two columns: bandwidth values and units.
+
+    :param csv_file: csv file with bandwidth values
+    :param aggregation_interval: aggregation interval
+    :return: aggregated bandwidth values and out-of-coverage rate
+    """
+    df = pd.read_csv(csv_file, header=None, delimiter=',')
+    bws = []
+    curr_bandwidth, curr_count = 0, 0
+    ooc_count = 0
+
+    for _, row in df.iterrows():
+        if row[1] == 'Kbits/sec':
+            bandwidth = float(row[0]) / 1e3
+        elif row[1] == 'bits/sec':
+            bandwidth = float(row[0]) / 1e6
+        else:
+            bandwidth = float(row[0])
+
+        if bandwidth < 1:
+            ooc_count += 1
+
+        curr_bandwidth += bandwidth
+        curr_count += 1
+
+        if curr_count == aggregation_interval:
+            average_bandwidth = curr_bandwidth / aggregation_interval
+            bws.append(average_bandwidth)
+            curr_bandwidth, curr_count = 0, 0
+
+        size = len(bws)
+        ooc_rate = ooc_count / size / aggregation_interval if size > 0 else 0
+
+    return bws, ooc_rate

@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, List
 
 from control.agent import Agent, AgentType
-from message.client import MqttConfig
+from message.client import MqttConfig, MqttMessage
 from utils.base import LOGGER
 from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, is_same_rtcp
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
@@ -59,7 +59,7 @@ class CsvViewerRecorderAgent(Agent):
                         elif self.verbose == 2:
                             self._save_stats_to_csv()
 
-    def _fetch_stats(self) -> List[Dict[str, Any]] | None:
+    def _fetch_stats(self) -> List[MqttMessage] | None:
         time.sleep(self.stats_update_interval)
         time_inactivity_starts = time.time()
         stats = []
@@ -73,10 +73,11 @@ class CsvViewerRecorderAgent(Agent):
                     )
                     return None
             else:
-                stats.append(json.loads(gst_stats.msg))
-        return stats
+                stats.append(gst_stats)
+        return stats or None
 
-    def _select_stats(self, gst_stats: Dict[str, Any]) -> bool:
+    def _select_stats(self, gst_stats_mqtt: MqttMessage) -> bool:
+        gst_stats = json.loads(gst_stats_mqtt.msg)
         rtp_outbound = find_stat(gst_stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
         rtp_inbound = find_stat(gst_stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
         ice_candidate_pair = find_stat(gst_stats, GstWebRTCStatsType.ICE_CANDIDATE_PAIR)
@@ -145,7 +146,7 @@ class CsvViewerRecorderAgent(Agent):
 
             # opened to extensions
             final_stats = {
-                "timestamp": datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3],
+                "timestamp": gst_stats_mqtt.timestamp,
                 "ssrc": ssrc,
                 "fraction_packets_lost": rtp_inbound_ssrc["rb-fractionlost"],
                 "packets_lost": rtp_inbound_ssrc["rb-packetslost"],
@@ -156,6 +157,7 @@ class CsvViewerRecorderAgent(Agent):
                 "jitter_ms": jitter_ms,
                 "nack_count": rtp_outbound[0]["recv-nack-count"],
                 "pli_count": rtp_outbound[0]["recv-pli-count"],
+                "tx_packets": rtp_outbound[0]["packets-sent"],
                 "rx_packets": rtp_outbound[0]["packets-received"],
                 "rx_mbytes": rtp_outbound[0]["bytes-received"] / 1000000,
                 "tx_rate_mbits": tx_rate,

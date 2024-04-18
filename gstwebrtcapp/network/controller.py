@@ -1,11 +1,13 @@
 import asyncio
 import enum
+import os
 import subprocess
 import shlex
 import random
 from typing import List, Tuple
 
-from utils.base import LOGGER
+from network.trace import NetworkTrace
+from utils.base import LOGGER, extract_network_traces_from_csv
 
 
 class NetworkScenario(enum.Enum):
@@ -29,12 +31,14 @@ class NetworkController:
         interface: str = "eth0",
         scenario_weights: List[float] | None = None,
         additional_rule_str: str = "",  # either --delay ..., or --loss ...
+        warmup: float = 10.0,
     ) -> None:
         self.interval = (interval, interval) if isinstance(interval, float) else interval
         self.gt_bandwidth = gt_bandwidth
         self.interface = interface
         self._update_weights(scenario_weights)
         self.additional_rule_str = additional_rule_str
+        self.warmup = warmup
 
         self.rules = []
         self.current_rule = ""
@@ -42,8 +46,10 @@ class NetworkController:
         self.is_fix_current_rule = False
 
     async def update_network_rule(self) -> None:
-        try:
-            while True:
+        await asyncio.sleep(self.warmup)
+        cancelled = False
+        while not cancelled:
+            try:
                 if not self.is_fix_current_rule:
                     if self.rules:
                         rule = self.rules.pop(0)
@@ -51,8 +57,9 @@ class NetworkController:
                     else:
                         self._apply_rule(self._generate_rule(self._get_scenario()))
                 await asyncio.sleep(random.uniform(*self.interval))
-        except asyncio.CancelledError:
-            self.reset_rule()
+            except asyncio.CancelledError:
+                cancelled = True
+                self.reset_rule()
 
     def set_rule(self, rule: str, is_fix: bool = True) -> None:
         self._apply_rule(rule)
@@ -71,6 +78,27 @@ class NetworkController:
         for _ in range(count):
             self.rules.append(self._generate_rule())
         LOGGER.info(f"NetworkController: {count} rules with weights {weights} generated")
+
+    def generate_rules_from_traces(self, trace_folder: str, is_curriculum_learning: bool = False) -> None:
+        network_traces: List[NetworkTrace] = []
+        for filename in os.listdir(trace_folder):
+            if filename.endswith('.csv'):
+                filepath = os.path.join(trace_folder, filename)
+                bw_values, ooc_rate = extract_network_traces_from_csv(filepath)
+                size = len(bw_values)
+                av_value = sum(bw_values) / size if size > 0 else 0
+                network_trace = NetworkTrace(size=size, av_value=av_value, ooc_rate=ooc_rate, values=bw_values)
+                network_traces.append(network_trace)
+
+        if is_curriculum_learning:
+            # sort by complexity (ooc_rate is when the bw lower than 1 mbps)
+            network_traces = sorted(network_traces, key=lambda x: x.ooc_rate)
+
+        self.rules = []
+        for network_trace in network_traces:
+            for bw_value in network_trace.values:
+                bw_value = max(bw_value, 8e-6)
+                self.rules.append(f"rate {bw_value}Mbps")
 
     def _apply_rule(self, rule: str) -> None:
         self._delete_rules()
