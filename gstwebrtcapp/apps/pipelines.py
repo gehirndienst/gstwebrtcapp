@@ -96,28 +96,28 @@ DEFAULT_WEBRTCBIN_SVTAV1_OUT_PIPELINE = '''
 '''
 
 DEFAULT_BIN_CUDA_PIPELINE = '''
-    webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
-    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
-    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! 
-    nvh264enc name=encoder preset=low-latency-hq gop-size=60 rc-mode=cbr-ld-hq aud=true bframes=2 zerolatency=true ! 
+    webrtcbin name=webrtc latency=10 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=100 ! queue ! rtph264depay ! h264parse ! nvh264dec ! queue max-size-buffers=0 max-size-time=0 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
+    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! queue max-size-buffers=10 ! 
+    nvh264enc name=encoder gop_size=-1 preset=low-latency-hq rc-mode=cbr qos=true zerolatency=true ! 
     rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1250 ! 
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
 '''
 
 DEFAULT_SINK_PIPELINE = '''
     webrtcsink name=ws signaller::uri=ws://127.0.0.1:8443 do-retransmission=true do-fec=true congestion-control=disabled
-    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate !
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=100 ! queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate !
     video/x-raw,format=I420,framerate=25/1 ! ws.
 '''
 
 DEFAULT_SINK_CUDA_PIPELINE = '''
     webrtcsink name=ws signaller::uri=ws://127.0.0.1:8443 do-retransmission=true do-fec=true congestion-control=disabled
-    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=100 ! queue ! rtph264depay ! h264parse ! nvh264dec ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
     video/x-raw(memory:CUDAMemory),format=I420,framerate=25/1 ! ws.
 '''
 
-DEFAULT_SINK_H265_PIPELINE = '''
+DEFAULT_SINK_H265_CUDA_PIPELINE = '''
     webrtcsink name=ws signaller::uri=ws://127.0.0.1:8443 do-retransmission=true do-fec=true congestion-control=disabled
-    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph265depay ! h265parse ! avdec_h265 ! videoconvert ! videoscale ! videorate !
-    video/x-raw,format=I420,framerate=25/1 ! ws.
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=100 ! queue ! rtph265depay ! h265parse ! nvh265dec ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
+    video/x-raw(memory:CUDAMemory),format=I420,framerate=25/1 ! ws.
 '''
