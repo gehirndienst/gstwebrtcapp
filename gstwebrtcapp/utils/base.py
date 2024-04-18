@@ -290,7 +290,6 @@ def extract_network_traces_from_csv(csv_file: str, aggregation_interval: int = 1
             bws.append(average_bandwidth)
             curr_bandwidth, curr_count = 0, 0
 
-        size = len(bws)
-        ooc_rate = ooc_count / size / aggregation_interval if size > 0 else 0
-
+    size = len(bws)
+    ooc_rate = ooc_count / size / aggregation_interval if size > 0 else 0
     return bws, ooc_rate
