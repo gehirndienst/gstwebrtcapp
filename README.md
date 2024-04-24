@@ -26,11 +26,11 @@ docker build -f Dockerfile-cuda -t gstwebrtcapp:latest .
 ```
 Then run the container with:
 ```bash
-docker run -it --name gstwebrtcapp-container --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
+docker run -it --name gstwebrtcapp-container --network=bridge -P --privileged --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
 ```
 to run the CUDA container, use:
 ```bash 
-docker run --gpus all -it --name gstwebrtcapp-container --network=host --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
+docker run --gpus all -it --name gstwebrtcapp-container --network=bridge -P --privileged --cap-add=NET_ADMIN {..} gstwebrtcapp:latest bash
 ```	
 where {..} are the display options. On Linux:
 ```bash
