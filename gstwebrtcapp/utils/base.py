@@ -257,6 +257,17 @@ def cut_first_elements_in_list(
     return input_list
 
 
+def get_min_diff_in_list(input_list: List[int | float]) -> int | float:
+    """
+    Get minimum difference between elements in the list
+
+    :param input_list: list of values
+    :return: minimum difference
+    """
+    return min([input_list[i] - input_list[i - 1] for i in range(1, len(input_list))])
+
+
+# I/O
 def extract_network_traces_from_csv(csv_file: str, aggregation_interval: int = 1) -> Tuple[List[float], float]:
     """
     Extract aggregated bandwidth values from the csv file. The original interval is assumed to be 1 second.

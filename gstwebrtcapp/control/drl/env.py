@@ -57,7 +57,7 @@ class DrlEnv(Env):
             return self.state, self.reward, True, True, {}
 
         # make state from the observation
-        state_dict = self.mdp.make_state(stats)
+        state_dict = self.mdp.make_state(stats, action)
         self.state = self._dict_to_gym_space_sample(state_dict)
 
         self.reward, self.reward_parts = self.mdp.calculate_reward()
@@ -89,8 +89,9 @@ class DrlEnv(Env):
         return self.state, {}
 
     def _get_observation(self) -> Dict[str, Any] | None:
-        sleep_until_condition_with_intervals(10, self.state_update_interval, lambda: self.is_finished)
-        if self.is_finished:
+        # wait for the state update and check meanwhile if the env is finished
+        is_finished = sleep_until_condition_with_intervals(10, self.state_update_interval, lambda: self.is_finished)
+        if is_finished:
             # this could be triggered e.g., by agent.stop() call or by DrlBreakCallback
             self._on_finish()
             return None

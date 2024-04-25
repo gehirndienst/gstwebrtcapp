@@ -5,7 +5,7 @@ import numpy as np
 from typing import Any, Dict, OrderedDict, Tuple
 
 from control.drl.reward import RewardFunctionFactory
-from media.preset import VideoPreset, VideoPresets
+from media.preset import VideoPresets
 from utils.base import LOGGER, scale, unscale, get_list_average, slice_list_in_intervals
 from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, get_stat_diff_concat
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
@@ -44,7 +44,7 @@ class MDP(metaclass=ABCMeta):
         **kwargs,
     ) -> None:
         self.reward_function = RewardFunctionFactory().create_reward_function(reward_function_name)
-        self.reward_params = None
+        self.reward_params = {}
         self.episode_length = episode_length
         self.num_observations_for_state = num_observations_for_state
         self.is_deliver_all_observations = is_deliver_all_observations
@@ -58,6 +58,7 @@ class MDP(metaclass=ABCMeta):
         self.is_scaled = False
         self.last_stats = None
         self.last_states = collections.deque(maxlen=self.state_history_size + 1)
+        self.last_actions = collections.deque(maxlen=self.state_history_size + 1)
         self.max_rb_packetslost = 0
         self.first_ssrc = None
         self.obs_filter = None
@@ -65,11 +66,12 @@ class MDP(metaclass=ABCMeta):
     @abstractmethod
     def reset(self):
         # memento pattern
-        self.reward_params = None
+        self.reward_params = {}
         self.first_ssrc = None
         self.states_made = 0
         self.last_stats = None
         self.last_states = collections.deque(maxlen=self.state_history_size + 1)
+        self.last_actions = collections.deque(maxlen=self.state_history_size + 1)
 
     @abstractmethod
     def create_observation_space(self) -> spaces.Dict:
@@ -84,8 +86,9 @@ class MDP(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
+    def make_state(self, stats: Dict[str, Any], action: Any) -> OrderedDict[str, Any]:
         self.states_made += 1
+        self.last_actions.append(action)
         pass
 
     @abstractmethod
@@ -104,8 +107,11 @@ class MDP(metaclass=ABCMeta):
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
         pass
 
-    def update_reward_params(self) -> None:
-        self.reward_params = None
+    def update_reward_params(self, *args, **kwargs) -> None:
+        self.reward_params = {
+            "constants": self.CONSTANTS,
+            "last_actions": self.last_actions,
+        }
 
     def calculate_reward(self) -> Tuple[float, Dict[str, Any | float] | None]:
         return self.reward_function.calculate_reward(self.last_states, self.reward_params)
@@ -191,7 +197,7 @@ class ViewerMDP(MDP):
         # normalized to [0, 1]
         return spaces.Dict(
             {
-                "bandwidth": spaces.Box(low=0, high=1, shape=(2,), dtype=np.float32),
+                "bandwidth": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
                 "fractionLossRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
                 "fractionNackRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
                 "fractionPliRate": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32),
@@ -213,7 +219,7 @@ class ViewerMDP(MDP):
     def make_default_state(self) -> OrderedDict[str, Any]:
         return collections.OrderedDict(
             {
-                "bandwidth": [0.0, 0.0],
+                "bandwidth": 0.0,
                 "fractionLossRate": 0.0,
                 "fractionNackRate": 0.0,
                 "fractionPliRate": 0.0,
@@ -228,9 +234,10 @@ class ViewerMDP(MDP):
             }
         )
 
-    def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
-        super().make_state(stats)
-        # get gcc bandiwdth
+    def make_state(self, stats: Dict[str, Any], action: Any) -> OrderedDict[str, Any]:
+        super().make_state(stats, action)
+
+        # get gcc bandwidth
         bws = []
         while not self.mqtts.subscriber.message_queues[self.mqtts.subscriber.topics.gcc].empty():
             msg = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.gcc)
@@ -238,21 +245,13 @@ class ViewerMDP(MDP):
         bws = [b / 1e6 for b in bws]
         if len(bws) == 0:
             if not self.last_states:
-                bandwidth = [0.0, 0.0]
+                bandwidth = 0.0
             else:
-                bandwidth = (
-                    self.last_states[-1]["bandwidth"] if 1.0 not in self.last_states[-1]["bandwidth"] else [1.0, 1.0]
-                )
+                bandwidth = self.last_states[-1]["bandwidth"] if 1.0 not in self.last_states[-1]["bandwidth"] else 1.0
         elif len(bws) == 1:
-            bandwidth = [
-                scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
-                scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
-            ]
+            bandwidth = scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"])
         else:
-            bandwidth = [
-                scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
-                scale(bws[-1], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"]),
-            ]
+            bandwidth = scale(bws[0], self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"])
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
         rtp_inbound = find_stat(stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
@@ -376,6 +375,7 @@ class ViewerMDP(MDP):
                 )
 
                 self.last_states.append(state)
+                self.update_reward_params()
                 return state
 
         LOGGER.warning("WARNING: Drl Agent: ViewerMDP: make_state: no ssrc stats found")
@@ -385,10 +385,11 @@ class ViewerMDP(MDP):
         return (
             collections.OrderedDict(
                 {
-                    "bandwidth": [
-                        unscale(s, self.CONSTANTS["MIN_BANDWIDTH_MBPS"], self.CONSTANTS["MAX_BANDWIDTH_MBPS"])
-                        for s in state["bandwidth"]
-                    ],
+                    "bandwidth": unscale(
+                        state["bandwidth"],
+                        self.CONSTANTS["MIN_BANDWIDTH_MBPS"],
+                        self.CONSTANTS["MAX_BANDWIDTH_MBPS"],
+                    ),
                     "fractionLossRate": state["fractionLossRate"],
                     "fractionNackRate": state["fractionNackRate"],
                     "fractionPliRate": state["fractionPliRate"],
@@ -506,8 +507,8 @@ class ViewerSeqMDP(MDP):
             }
         )
 
-    def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
-        super().make_state(stats)
+    def make_state(self, stats: Dict[str, Any], action: Any) -> OrderedDict[str, Any]:
+        super().make_state(stats, action)
 
         # get gcc bandiwdth
         bws = []
@@ -712,6 +713,7 @@ class ViewerSeqMDP(MDP):
                 )
 
                 self.last_states.append(state)
+                self.update_reward_params()
                 return state
 
         LOGGER.warning("WARNING: Drl Agent: ViewerMDP: make_state: no ssrc stats found")
@@ -818,8 +820,8 @@ class ViewerSeqNoBaselineMDP(ViewerSeqMDP):
             }
         )
 
-    def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
-        super().make_state(stats)
+    def make_state(self, stats: Dict[str, Any], action: Any) -> OrderedDict[str, Any]:
+        super().make_state(stats, action)
 
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
@@ -999,6 +1001,7 @@ class ViewerSeqNoBaselineMDP(ViewerSeqMDP):
                 )
 
                 self.last_states.append(state)
+                self.update_reward_params()
                 return state
 
         LOGGER.warning("WARNING: Drl Agent: ViewerMDP: make_state: no ssrc stats found")
@@ -1160,8 +1163,8 @@ class ViewerSeqOfflineMDP(MDP):
             }
         )
 
-    def make_state(self, stats: Dict[str, Any]) -> OrderedDict[str, Any]:
-        super().make_state(stats)
+    def make_state(self, stats: Dict[str, Any], action: Any) -> OrderedDict[str, Any]:
+        super().make_state(stats, action)
 
         # get dicts with needed stats
         rtp_outbound = find_stat(stats, GstWebRTCStatsType.RTP_OUTBOUND_STREAM)
@@ -1287,9 +1290,9 @@ class ViewerSeqOfflineMDP(MDP):
                     }
                 )
 
+                self.last_states.append(state)
                 self.update_reward_params()
 
-                self.last_states.append(state)
                 return state
 
         LOGGER.warning("WARNING: Drl Agent.make_state: no ssrc stats found")
@@ -1313,7 +1316,5 @@ class ViewerSeqOfflineMDP(MDP):
         return {"bitrate": self.convert_to_unscaled_action(action)}
 
     def update_reward_params(self) -> None:
-        self.reward_params = {
-            "constants": self.CONSTANTS,
-            "max_delay": max(self.delays) if self.delays else 0.0,
-        }
+        super().update_reward_params()
+        self.reward_params["max_delay"] = max(self.delays) if self.delays else 0.0
