@@ -10,11 +10,11 @@ import threading
 
 from apps.app import GstWebRTCAppConfig
 from apps.ahoyapp.connector import AhoyConnector
-from apps.pipelines import DEFAULT_BIN_CUDA_PIPELINE, DEFAULT_SINK_PIPELINE
+from apps.pipelines import DEFAULT_BIN_PIPELINE, DEFAULT_BIN_CUDA_PIPELINE, DEFAULT_SINK_PIPELINE
 from apps.sinkapp.connector import SinkConnector
 from control.drl.agent import DrlAgent
 from control.drl.config import DrlConfig
-from control.drl.mdp import ViewerMDP
+from control.drl.mdp import ViewerSeqMDP
 from control.recorder.agent import CsvViewerRecorderAgent
 from message.broker import MosquittoBroker
 from message.client import MqttConfig
@@ -30,113 +30,46 @@ AHOY_DIRECTOR_URL = "..."
 API_KEY = "..."
 VIDEO_SOURCE = "rtsp://..."
 
+MQTT_CFG = MqttConfig(
+    id="local_instance",
+    broker_port=1884,
+)
 
-async def manipulate_video_coro(conn: AhoyConnector):
-    while conn.app is None:
-        await asyncio.sleep(0.5)
-    await asyncio.sleep(20)
-    LOGGER.info("----------Run test video manipulating coro...")
-    LOGGER.info("----------Setting new bitrate...")
-    conn.app.set_bitrate(1000)
-    await asyncio.sleep(20)
-    LOGGER.info("----------Setting new resolution...")
-    conn.app.set_resolution(192, 144)
-    await asyncio.sleep(20)
-    LOGGER.info("----------Setting new framerate...")
-    conn.app.set_framerate(15)
-    await asyncio.sleep(20)
-    LOGGER.info("----------Setting new fec...")
-    conn.app.set_fec_percentage(50)
-    await asyncio.sleep(20)
-    LOGGER.info("----------Finished test video manipulating coro...")
-
-
-async def test_manipulate_video():
-    # run it to test video manipulation.
-    try:
-        broker = MosquittoBroker()
-        broker_thread = threading.Thread(target=broker.run, daemon=True)
-        broker_thread.start()
-
-        cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
-
-        conn = AhoyConnector(
-            server=AHOY_DIRECTOR_URL,
-            api_key=API_KEY,
-            pipeline_config=cfg,
-        )
-
-        await conn.connect_coro()
-
-        # note that a new coroutine is created and awaited together with webrtc_coro to manipulate the video
-        conn_task = asyncio.create_task(conn.webrtc_coro())
-        pipeline_task = asyncio.create_task(manipulate_video_coro(conn))
-        await asyncio.gather(conn_task, pipeline_task)
-
-        broker.stop()
-        broker_thread.join()
-
-    except KeyboardInterrupt:
-        LOGGER.info("KeyboardInterrupt received, exiting...")
-        return
-
-
-async def test_nvenc():
-    # run it to test nvenc hardware acceleration.
-    try:
-        broker = MosquittoBroker()
-        broker_thread = threading.Thread(target=broker.run, daemon=True)
-        broker_thread.start()
-
-        cfg = GstWebRTCAppConfig(
-            video_url="VIDEO_SOURCE",
-            pipeline_str=DEFAULT_BIN_CUDA_PIPELINE,
-            codec="h264",
-            is_cuda=True,
-        )
-
-        conn = AhoyConnector(
-            server=AHOY_DIRECTOR_URL,
-            api_key=API_KEY,
-            pipeline_config=cfg,
-        )
-
-        await conn.connect_coro()
-        await conn.webrtc_coro()
-
-        broker.stop()
-        broker_thread.join()
-
-    except KeyboardInterrupt:
-        LOGGER.info("KeyboardInterrupt received, exiting...")
-        return
+APP_CFG = GstWebRTCAppConfig(
+    pipeline_str=DEFAULT_BIN_PIPELINE,
+    video_url=VIDEO_SOURCE,
+    codec="h264",
+    bitrate=2000,
+    resolution={"width": 1280, "height": 720},
+    gcc_settings={"min-bitrate": 400000, "max-bitrate": 10000000},
+    is_cuda=False,
+)
 
 
 async def test_csv_recorder():
     # run it to test csv viewer recorder agent
     try:
-        broker = MosquittoBroker()
+        broker = MosquittoBroker(port=1884)
         broker_thread = threading.Thread(target=broker.run, daemon=True)
         broker_thread.start()
-
-        cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
 
         stats_update_interval = 1.0
 
         agent = CsvViewerRecorderAgent(
-            mqtt_config=MqttConfig(),
+            mqtt_config=MQTT_CFG,
             stats_update_interval=stats_update_interval,
-            warmup=10.0,
+            warmup=20.0,
             log_path="./logs",
             verbose=2,
         )
 
         conn = AhoyConnector(
-            pipeline_config=cfg,
-            agent=agent,
+            pipeline_config=APP_CFG,
+            agents=[agent],
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
             feed_name="recorder_test",
+            mqtt_config=MQTT_CFG,
         )
 
         await conn.connect_coro()
@@ -151,7 +84,7 @@ async def test_csv_recorder():
 
 
 async def test_drl():
-    # run it to test drl agent
+    # run it to test drl agent train and eval
     try:
         broker = MosquittoBroker()
         broker_thread = threading.Thread(target=broker.run, daemon=True)
@@ -159,93 +92,72 @@ async def test_drl():
 
         episodes = 10
         episode_length = 50
-        stats_update_interval = 3.0
+        stats_update_interval = 3.0  # sec
 
-        app_cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
-
-        agent = DrlAgent(
-            drl_config=DrlConfig(
-                mode="train",
-                model_name="sac",
-                episodes=episodes,
-                episode_length=episode_length,
-                state_update_interval=stats_update_interval,
-                hyperparams_cfg={
-                    "policy": "MultiInputPolicy",
-                    "batch_size": 128,
-                    "ent_coef": "auto",
-                    "policy_kwargs": {"log_std_init": -1, "activation_fn": "relu", "net_arch": [256, 256]},
-                },
-                callbacks=['print_step'],
-                save_model_path="./models",
-                save_log_path="./logs",
-                verbose=2,
-            ),
-            mdp=ViewerMDP(
-                reward_function_name="qoe_ahoy",
-                episode_length=episode_length,
-                constants={"MAX_BITRATE_STREAM_MBPS": 6},  # Ahoy fixes the max bitrate to 6 Mbps in SDP
-            ),
-            mqtt_config=MqttConfig(),
-        )
-
-        conn = AhoyConnector(
-            pipeline_config=app_cfg,
-            agent=agent,
-            server=AHOY_DIRECTOR_URL,
-            api_key=API_KEY,
-            feed_name="drl_test",
-        )
-
-        await conn.connect_coro()
-        await conn.webrtc_coro()
-
-        broker.stop()
-        broker_thread.join()
-
-    except KeyboardInterrupt:
-        LOGGER.info("KeyboardInterrupt received, exiting...")
-        return
-
-
-async def test_drl_eval():
-    try:
-        broker = MosquittoBroker()
-        broker_thread = threading.Thread(target=broker.run, daemon=True)
-        broker_thread.start()
-
-        episodes = 5
-        episode_length = 512
-        stats_update_interval = 3.0
-
-        app_cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
-
-        drl_cfg = DrlConfig(
-            mode="eval",
-            model_file="med.zip",
+        # choose either train or eval configuration
+        train_drl_cfg = DrlConfig(
+            mode="train",
             model_name="sac",
             episodes=episodes,
             episode_length=episode_length,
             state_update_interval=stats_update_interval,
+            state_max_inactivity_time=60.0,
+            hyperparams_cfg={
+                "policy": "MultiInputPolicy",
+                "batch_size": 128,
+                "ent_coef": "auto",
+                "policy_kwargs": {"log_std_init": -1, "activation_fn": "relu", "net_arch": [256, 256]},
+            },
+            callbacks=['print_step'],
+            save_model_path="./models",
+            save_log_path="./logs",
+            verbose=2,
+        )
+
+        eval_drl_cfg = DrlConfig(
+            mode="eval",
+            model_file="./models/fantastic_sb3_drl_model.zip",
+            model_name="sac",
+            episodes=episodes,
+            episode_length=episode_length,
+            state_update_interval=stats_update_interval,
+            state_max_inactivity_time=60.0,
             deterministic=True,
         )
 
-        agent = DrlAgent(
-            drl_config=drl_cfg,
-            mdp=ViewerMDP(
-                reward_function_name="qoe_ahoy",
-                episode_length=episode_length,
-                constants={"MAX_BITRATE_STREAM_MBPS": 6},
-            ),
-            mqtt_config=MqttConfig(),
+        mdp = ViewerSeqMDP(
+            reward_function_name="qoe_ahoy_seq",
+            episode_length=episode_length,
+            num_observations_for_state=5,
+            constants={
+                "MAX_BITRATE_STREAM_MBPS": 10,
+                "MAX_BANDWIDTH_MBPS": APP_CFG.gcc_settings["max-bitrate"] / 1000000,
+                "MIN_BANDWIDTH_MBPS": APP_CFG.gcc_settings["min-bitrate"] / 1000000,
+            },
+        )
+
+        drl_agent = DrlAgent(
+            drl_config=train_drl_cfg,  # train by default
+            mdp=mdp,
+            mqtt_config=MQTT_CFG,
+            warmup=20.0,
+        )
+
+        logger_agent = CsvViewerRecorderAgent(
+            mqtt_config=MQTT_CFG,
+            stats_update_interval=stats_update_interval,
+            warmup=20.0,
+            log_path="./logs",
+            verbose=2,
         )
 
         conn = AhoyConnector(
-            pipeline_config=app_cfg,
-            agent=agent,
+            pipeline_config=APP_CFG,
+            agents=[drl_agent, logger_agent],
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
-            feed_name="test_drl_eval",
+            feed_name="drl_test",
+            mqtt_config=MQTT_CFG,
         )
 
         await conn.connect_coro()
@@ -265,16 +177,22 @@ async def test_network_controller():
         broker_thread = threading.Thread(target=broker.run, daemon=True)
         broker_thread.start()
 
-        cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
-
-        network_controller = NetworkController(gt_bandwidth=10.0, interval=10.0)
-        network_controller.generate_rules(100, [0.7, 0.2, 0.1])
+        network_controller = NetworkController(
+            gt_bandwidth=10.0,
+            interval=(20.0, 120.0),
+            interface="eth0",
+            additional_rule_str="--delay 50ms",
+            log_path="./logs",  # enables csv logging to the pointed folder, set to None to disable
+            warmup=20.0,
+        )
+        network_controller.generate_rules(1000, [0.7, 0.2, 0.1])
 
         conn = AhoyConnector(
-            pipeline_config=cfg,
+            pipeline_config=APP_CFG,
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
             feed_name="test_network_controller",
+            mqtt_config=MQTT_CFG,
             network_controller=network_controller,
         )
 
@@ -297,14 +215,19 @@ async def test_sink_app():
         broker_thread = threading.Thread(target=broker.run, daemon=True)
         broker_thread.start()
 
-        cfg = GstWebRTCAppConfig(
-            pipeline_str=DEFAULT_SINK_PIPELINE,
-            bitrate=6000,
+        app_cfg_sink = GstWebRTCAppConfig(
+            pipeline_str=DEFAULT_SINK_PIPELINE,  # here is the difference
             video_url=VIDEO_SOURCE,
+            codec="h264",
+            bitrate=2000,
+            resolution={"width": 1280, "height": 720},
+            gcc_settings={"min-bitrate": 400000, "max-bitrate": 10000000},
+            is_cuda=False,
         )
 
         conn = SinkConnector(
-            pipeline_config=cfg,
+            pipeline_config=app_cfg_sink,
+            mqtt_config=MQTT_CFG,
         )
 
         await conn.webrtc_coro()
@@ -323,16 +246,28 @@ async def default():
         broker_thread = threading.Thread(target=broker.run, daemon=True)
         broker_thread.start()
 
-        cfg = GstWebRTCAppConfig(video_url=VIDEO_SOURCE)
+        is_cuda = False  # change to true if you have an NVIDIA GPU with HA support
+        pipeline = DEFAULT_BIN_PIPELINE if not is_cuda else DEFAULT_BIN_CUDA_PIPELINE
+
+        app_cfg = GstWebRTCAppConfig(
+            pipeline_str=pipeline,
+            video_url=APP_CFG.video_url,
+            codec=APP_CFG.codec,
+            bitrate=APP_CFG.bitrate,
+            resolution=APP_CFG.resolution,
+            gcc_settings=APP_CFG.gcc_settings,
+            is_cuda=is_cuda,
+        )
 
         conn = AhoyConnector(
+            pipeline_config=app_cfg,
             server=AHOY_DIRECTOR_URL,
             api_key=API_KEY,
-            pipeline_config=cfg,
+            feed_name="enjoy_the_stream",
+            mqtt_config=MQTT_CFG,
         )
 
         await conn.connect_coro()
-
         await conn.webrtc_coro()
 
         broker.stop()
