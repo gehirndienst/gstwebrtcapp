@@ -13,13 +13,13 @@ License:
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
 import asyncio
-from datetime import datetime
 import json
 import requests
 import threading
 from typing import List
 
 import gi
+
 
 gi.require_version('Gst', '1.0')
 gi.require_version('GstSdp', '1.0')
@@ -30,7 +30,8 @@ from gi.repository import GstWebRTC
 
 from apps.app import GstWebRTCAppConfig
 from apps.ahoyapp.app import AhoyApp
-from control.agent import Agent
+from control.agent import Agent, AgentType
+from control.safety.switcher import SwitchingPair
 from media.preset import get_video_preset
 from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from network.controller import NetworkController
@@ -51,6 +52,7 @@ class AhoyConnector:
     :param str stats_channel_name: Name of the stats channel.
     :param MqttConfig mqtt_config: Configuration for the MQTT client.
     :param NetworkController network_controller: Network controller that optionally controls the network rules. Nullable.
+    :param SwitchingPair switching_pair: Pair of agents for safety detector and switching. Nullable.
     """
 
     def __init__(
@@ -64,6 +66,7 @@ class AhoyConnector:
         stats_channel_name: str = "telemetry",
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
+        switching_pair: SwitchingPair | None = None,
     ):
         self.server = server
         self.api_key = api_key
@@ -82,14 +85,20 @@ class AhoyConnector:
         self.webrtcbin_ice_connection_state = GstWebRTC.WebRTCICEConnectionState.NEW
         self.pc_out_ice_connection_state = "new"
 
-        self.agents = agents
-        self.agent_threads = []
+        # agents
+        self.agents = {}
+        self.agent_threads = {}
+        self.switching_pair = switching_pair
+        self.is_switching = False
+        self._prepare_agents(agents)
+
+        # mqtt
         self.mqtt_config = mqtt_config
         self.mqtts = MqttPair(
             publisher=MqttPublisher(self.mqtt_config),
             subscriber=MqttSubscriber(self.mqtt_config),
         )
-        self.mqtts_threads = None
+        self.mqtts_threads = []
         self.network_controller = network_controller
 
         self.is_running = False
@@ -214,7 +223,6 @@ class AhoyConnector:
         async def on_message(msg) -> None:
             # TODO: currently nothing comes from Ahoy to trigger this handler
             LOGGER.info(f"INFO: STATS CHANNEL received stats message {msg}")
-            self.ahoy_stats.append((datetime.now().strftime("%Y-%m-%d-%H:%M:%S:%f")[:-3], msg))
 
     def _on_received_sdp_request(self, sdp) -> None:
         LOGGER.info(f"INFO: _on_received_sdp_request callback, processing the incoming SDP request...")
@@ -379,6 +387,8 @@ class AhoyConnector:
                                 self._app.set_framerate(msg[action])
                             case "preset":
                                 self._app.set_preset(get_video_preset(msg[action]))
+                            case "switch":
+                                self._switch_agents(msg[action])
                             case _:
                                 LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
         LOGGER.info(f"OK: ACTION HANDLER IS OFF!")
@@ -409,12 +419,12 @@ class AhoyConnector:
             actions_task = asyncio.create_task(self.handle_actions())
             be_task = asyncio.create_task(self.handle_bandwidth_estimations())
             tasks = [signalling_task, pipeline_task, webrtcbin_stats_task, actions_task, be_task]
-            if self.agents is not None:
+            if self.agents:
                 # start agent threads
-                for agent in self.agents:
+                for agent in self.agents.values():
                     agent_thread = threading.Thread(target=agent.run, args=(True,), daemon=True)
                     agent_thread.start()
-                    self.agent_threads.append(agent_thread)
+                    self.agent_threads[agent.id] = agent_thread
             if self.network_controller is not None:
                 # start network controller's task
                 network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
@@ -434,7 +444,7 @@ class AhoyConnector:
                 for task in tasks:
                     task.cancel()
                 if self.agent_threads:
-                    self.terminate_agents()
+                    self._terminate_agents()
                 self.mqtts.publisher.stop()
                 self.mqtts.subscriber.stop()
                 for t in self.mqtts_threads:
@@ -453,7 +463,7 @@ class AhoyConnector:
                 for task in tasks:
                     task.cancel()
                 if self.agent_threads:
-                    self.terminate_agents()
+                    self._terminate_agents()
                 self.mqtts.publisher.stop()
                 self.mqtts.subscriber.stop()
                 for t in self.mqtts_threads:
@@ -471,7 +481,7 @@ class AhoyConnector:
             for task in tasks:
                 task.cancel()
             if self.agent_threads:
-                self.terminate_agents()
+                self._terminate_agents()
             self.mqtts.publisher.stop()
             self.mqtts.subscriber.stop()
             for t in self.mqtts_threads:
@@ -495,11 +505,64 @@ class AhoyConnector:
         if self.webrtc_coro_control_task is not None:
             self.webrtc_coro_control_task.cancel()
 
-    def terminate_agents(self) -> None:
+    def _prepare_agents(self, agents: List[Agent] | None) -> None:
+        if agents is not None:
+            self.agents = {agent.id: agent for agent in agents}
+
+            if self.switching_pair is None:
+                return
+            if (
+                AgentType.SAFETY_DETECTOR in [agent.type for agent in self.agents.values()]
+                and self.switching_pair is None
+            ):
+                LOGGER.error("ERROR: SafetyDetectorAgent has no corresponding switching pair. Switching is off")
+                return
+            if not all(
+                agent_id in self.agents.keys()
+                for agent_id in [self.switching_pair.safe_id, self.switching_pair.unsafe_id]
+            ):
+                LOGGER.error("ERROR: Swithing pair contains invalid agent ids. Switching is off")
+                return
+
+            self.is_switching = True
+            LOGGER.info("INFO: SafetyAgentDetector is on, switching is enabled!")
+
+    def _switch_agents(self, algo: int) -> None:
+        if self.is_switching:
+            is_first_switch = False  # if true then do not restart the agents as they are already running
+            if not self.switching_pair.is_warmups_resetted:
+                # reset warmups
+                self.agents[self.switching_pair.safe_id].warmup = 0.0
+                self.agents[self.switching_pair.unsafe_id].warmup = 0.0
+                self.switching_pair.is_warmups_resetted = True
+                is_first_switch = True
+
+            if algo == 0:
+                # enable gcc, disable drl
+                if not is_first_switch:
+                    self.agent_threads[self.switching_pair.safe_id] = threading.Thread(
+                        target=self.agents[self.switching_pair.safe_id].run, args=(True,), daemon=True
+                    )
+                    self.agent_threads[self.switching_pair.safe_id].start()
+                else:
+                    self.agents[self.switching_pair.safe_id].enable_actions()
+                self.agents[self.switching_pair.unsafe_id].stop()
+                self.agent_threads[self.switching_pair.unsafe_id].join()
+            else:
+                # enable drl, disable gcc
+                if not is_first_switch:
+                    self.agent_threads[self.switching_pair.unsafe_id] = threading.Thread(
+                        target=self.agents[self.switching_pair.unsafe_id].run, args=(True,), daemon=True
+                    )
+                    self.agent_threads[self.switching_pair.unsafe_id].start()
+                self.agents[self.switching_pair.safe_id].stop()
+                self.agent_threads[self.switching_pair.safe_id].join()
+
+    def _terminate_agents(self) -> None:
         if self.agent_threads:
-            for agent in self.agents:
+            for agent in self.agents.values():
                 agent.stop()
-            for agent_thread in self.agent_threads:
+            for agent_thread in self.agent_threads.values():
                 if agent_thread:
                     agent_thread.join()
 

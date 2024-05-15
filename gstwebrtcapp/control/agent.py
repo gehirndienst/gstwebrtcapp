@@ -14,6 +14,7 @@ License:
 
 from abc import ABCMeta
 from enum import Enum
+import secrets
 import threading
 
 from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
@@ -25,12 +26,15 @@ class AgentType(Enum):
     DRL = "DRL"
     DRL_OFFLINE = "DRL_OFFLINE"
     RECORDER = "RECORDER"
+    SAFETY_DETECTOR = "SAFETY_DETECTOR"
 
 
 class Agent(metaclass=ABCMeta):
     def __init__(
         self,
         mqtt_config: MqttConfig,
+        id: str = "",
+        warmup: float = 0.0,
     ) -> None:
         self.mqtt_config = mqtt_config
         self.mqtts = MqttPair(
@@ -38,7 +42,11 @@ class Agent(metaclass=ABCMeta):
             subscriber=MqttSubscriber(self.mqtt_config),
         )
         self.mqtts_threads = []
+
+        self.id = id or secrets.token_hex(4)
+        self.warmup = warmup
         self.type = AgentType.ABSTRACT
+        self.is_running = False
 
     def run(self, *args, **kwargs) -> None:
         self.mqtts_threads = [
@@ -49,9 +57,11 @@ class Agent(metaclass=ABCMeta):
         self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])
 
     def stop(self) -> None:
+        self.is_running = False
         self.mqtts.publisher.stop()
         self.mqtts.subscriber.stop()
         if self.mqtts_threads:
             for t in self.mqtts_threads:
                 if t:
                     t.join()
+        self.mqtts_threads.clear()

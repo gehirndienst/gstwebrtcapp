@@ -25,7 +25,8 @@ from gi.repository import Gst
 
 from apps.app import GstWebRTCAppConfig
 from apps.sinkapp.app import SinkApp
-from control.agent import Agent
+from control.agent import Agent, AgentType
+from control.safety.switcher import SwitchingPair
 from media.preset import get_video_preset
 from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from network.controller import NetworkController
@@ -42,6 +43,7 @@ class SinkConnector:
         feed_name: str = "gst-stream",
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
+        switching_pair: SwitchingPair | None = None,
     ):
         self.pipeline_config = pipeline_config
         if 'signaller::uri' in self.pipeline_config.pipeline_str:
@@ -53,20 +55,22 @@ class SinkConnector:
                 r'(webrtcsink[^\n]*)', fr'\1 signaller::uri={server}', self.pipeline_config.pipeline_str
             )
 
-        self.agents = agents
-        self.agent_threads = []
+        self.agents = {}
+        self.agent_threads = {}
+        self.switching_pair = switching_pair
+        self.is_switching = False
+        self._prepare_agents(agents)
+
         self.mqtt_config = mqtt_config
         self.mqtts = MqttPair(
             publisher=MqttPublisher(self.mqtt_config),
             subscriber=MqttSubscriber(self.mqtt_config),
         )
-        self.mqtts_threads = None
+        self.mqtts_threads = []
         self.feed_name = feed_name
         self.network_controller = network_controller
 
         self._app = None
-        self.webrtcbin_stats = deque(maxlen=10000)
-
         self.is_running = False
 
     async def webrtc_coro(self) -> None:
@@ -96,12 +100,12 @@ class SinkConnector:
             actions_task = asyncio.create_task(self.handle_actions())
             be_task = asyncio.create_task(self.handle_bandwidth_estimations())
             tasks = [pipeline_task, post_init_pipeline_task, webrtcsink_stats_task, actions_task, be_task]
-            if self.agents is not None:
+            if self.agents:
                 # start agent threads
-                for agent in self.agents:
+                for agent in self.agents.values():
                     agent_thread = threading.Thread(target=agent.run, args=(True,), daemon=True)
                     agent_thread.start()
-                    self.agent_threads.append(agent_thread)
+                    self.agent_threads[agent.id] = agent_thread
             if self.network_controller is not None:
                 # start network controller's task
                 network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
@@ -114,7 +118,7 @@ class SinkConnector:
             for task in tasks:
                 task.cancel()
             if self.agent_threads:
-                self.terminate_agents()
+                self._terminate_agents()
             self.mqtts.publisher.stop()
             self.mqtts.subscriber.stop()
             for t in self.mqtts_threads:
@@ -139,14 +143,6 @@ class SinkConnector:
                 self._app.send_termination_message_to_bus()
             else:
                 self._app.terminate_pipeline()
-
-    def terminate_agents(self) -> None:
-        if self.agent_threads:
-            for agent in self.agents:
-                agent.stop()
-            for agent_thread in self.agent_threads:
-                if agent_thread:
-                    agent_thread.join()
 
     async def handle_webrtcsink_stats(self) -> None:
         LOGGER.info(f"OK: WEBRTCSINK STATS HANDLER IS ON -- ready to check for stats")
@@ -192,6 +188,8 @@ class SinkConnector:
                                 self._app.set_framerate(msg[action])
                             case "preset":
                                 self._app.set_preset(get_video_preset(msg[action]))
+                            case "switch":
+                                self._switch_agents(msg[action])
                             case _:
                                 LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
 
@@ -201,6 +199,67 @@ class SinkConnector:
             gcc_bw = await self._app.gcc_estimated_bitrates.get()
             self.mqtts.publisher.publish(self.mqtt_config.topics.gcc, str(gcc_bw))
         LOGGER.info(f"OK: BANDWIDTH ESTIMATIONS HANDLER IS OFF!")
+
+    def _prepare_agents(self, agents: List[Agent] | None) -> None:
+        if agents is not None:
+            self.agents = {agent.id: agent for agent in agents}
+
+            if self.switching_pair is None:
+                return
+            if (
+                AgentType.SAFETY_DETECTOR in [agent.type for agent in self.agents.values()]
+                and self.switching_pair is None
+            ):
+                LOGGER.error("ERROR: SafetyDetectorAgent has no corresponding switching pair. Switching is off")
+                return
+            if not all(
+                agent_id in self.agents.keys()
+                for agent_id in [self.switching_pair.safe_id, self.switching_pair.unsafe_id]
+            ):
+                LOGGER.error("ERROR: Swithing pair contains invalid agent ids. Switching is off")
+                return
+
+            self.is_switching = True
+            LOGGER.info("INFO: SafetyAgentDetector is on, switching is enabled!")
+
+    def _switch_agents(self, algo: int) -> None:
+        if self.is_switching:
+            is_first_switch = False  # if true then do not restart the agents as they are already running
+            if not self.switching_pair.is_warmups_resetted:
+                # reset warmups
+                self.agents[self.switching_pair.safe_id].warmup = 0.0
+                self.agents[self.switching_pair.unsafe_id].warmup = 0.0
+                self.switching_pair.is_warmups_resetted = True
+                is_first_switch = True
+
+            if algo == 0:
+                # enable gcc, disable drl
+                if not is_first_switch:
+                    self.agent_threads[self.switching_pair.safe_id] = threading.Thread(
+                        target=self.agents[self.switching_pair.safe_id].run, args=(True,), daemon=True
+                    )
+                    self.agent_threads[self.switching_pair.safe_id].start()
+                else:
+                    self.agents[self.switching_pair.safe_id].enable_actions()
+                self.agents[self.switching_pair.unsafe_id].stop()
+                self.agent_threads[self.switching_pair.unsafe_id].join()
+            else:
+                # enable drl, disable gcc
+                if not is_first_switch:
+                    self.agent_threads[self.switching_pair.unsafe_id] = threading.Thread(
+                        target=self.agents[self.switching_pair.unsafe_id].run, args=(True,), daemon=True
+                    )
+                    self.agent_threads[self.switching_pair.unsafe_id].start()
+                self.agents[self.switching_pair.safe_id].stop()
+                self.agent_threads[self.switching_pair.safe_id].join()
+
+    def _terminate_agents(self) -> None:
+        if self.agent_threads:
+            for agent in self.agents.values():
+                agent.stop()
+            for agent_thread in self.agent_threads.values():
+                if agent_thread:
+                    agent_thread.join()
 
     @property
     def app(self) -> SinkApp | None:

@@ -25,12 +25,14 @@ class DrlEnv(Env):
         max_episodes: int = -1,
         state_update_interval: float = 1.0,
         max_inactivity_time: float = 20.0,
+        is_reset_episodes: bool = False,
     ):
         self.mdp = mdp
         self.mqtts = mqtts
         self.max_episodes = max_episodes
         self.state_update_interval = state_update_interval
         self.max_inactivity_time = max_inactivity_time
+        self.is_reset_episodes = is_reset_episodes
 
         self.episodes = 1
         self.steps = 0
@@ -54,18 +56,30 @@ class DrlEnv(Env):
         # get observation (webrtc stats) from the controller
         stats = self._get_observation()
         if stats is None:
-            return self.state, self.reward, True, True, {}
+            # finished
+            return self.state, self.reward, False, True, {}
 
         # make state from the observation
         state_dict = self.mdp.make_state(stats, action)
         self.state = self._dict_to_gym_space_sample(state_dict)
+        self.mqtts.publisher.publish(
+            self.mqtts.subscriber.topics.state,
+            json.dumps(self.mdp.convert_to_unscaled_state(state_dict)),
+        )
 
         self.reward, self.reward_parts = self.mdp.calculate_reward()
 
-        terminated = self.mdp.is_terminated(self.steps)
+        terminated = self._is_terminal()
         truncated = self.mdp.is_truncated(self.steps)
         if terminated or truncated:
             self.episodes += 1
+
+        if terminated:
+            # a terminal state can be only a switch event. The env must be finished to stop the agent.
+            # Returns also a hardcoded negative reward.
+            self.is_finished = True
+            LOGGER.info("INFO: Env reached a terminal state by triggering a safety detector, closing the env...")
+            return self.state, -50, True, False, {}
 
         return self.state, self.reward, terminated, truncated, {}
 
@@ -77,19 +91,23 @@ class DrlEnv(Env):
 
         if self.max_episodes > 0 and self.episodes > self.max_episodes:
             self.is_finished = True
-        elif options.get("reset_after_break") is not None:
+        elif options.get("reset_after_break", None) is not None:
             self.is_finished = False
+
+        if self.is_reset_episodes:
+            self.episodes = 1
 
         self.state = self._get_initial_state()
 
         # to save the reward fields in a dict
         self.reward_parts = self.mdp.get_default_reward_parts_dict()
 
-        LOGGER.info(f"INFO: resetting the DRL env: episodes {self.episodes}, is finished {self.is_finished}")
+        LOGGER.info(f"INFO: resetting the DRL env: episode {self.episodes}, is finished {self.is_finished}")
         return self.state, {}
 
     def _get_observation(self) -> Dict[str, Any] | None:
         # wait for the state update and check meanwhile if the env is finished
+        self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.stats)
         is_finished = sleep_until_condition_with_intervals(10, self.state_update_interval, lambda: self.is_finished)
         if is_finished:
             # this could be triggered e.g., by agent.stop() call or by DrlBreakCallback
@@ -104,7 +122,7 @@ class DrlEnv(Env):
             if stats is None:
                 if time.time() - time_inactivity_starts > self.max_inactivity_time:
                     LOGGER.warning(
-                        "WARNING: No stats were pulled from the observation queue after"
+                        "WARNING: DRL Env: No stats were pulled after"
                         f" {self.max_inactivity_time} sec, closing the env..."
                     )
                     self.is_finished = True
@@ -159,6 +177,15 @@ class DrlEnv(Env):
 
     def _get_initial_state(self) -> OrderedDict[str, Any]:
         return self._dict_to_gym_space_sample(self.mdp.make_default_state())
+
+    def _is_terminal(self, max_waiting_time: float = 0.05) -> bool:
+        self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.actions)
+        is_terminal = sleep_until_condition_with_intervals(
+            10,
+            max_waiting_time,
+            lambda: self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.actions) is not None,
+        )
+        return is_terminal
 
     def _on_finish(self) -> None:
         LOGGER.info("WARNING: Interrupted by a finish signal, closing the env...")

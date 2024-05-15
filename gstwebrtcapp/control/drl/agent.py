@@ -15,16 +15,19 @@ class DrlAgent(Agent):
         drl_config: DrlConfig,
         mdp: MDP,
         mqtt_config: MqttConfig,
+        id: str = "drl",
         warmup: float = 10.0,
     ) -> None:
-        super().__init__(mqtt_config)
-        self.warmup = warmup
+        super().__init__(mqtt_config, id, warmup)
         self.type = AgentType.DRL
         self.manager = DrlManager(drl_config, mdp, self.mqtts)
 
     def run(self, is_load_last_model: bool = False) -> None:
         super().run()
         time.sleep(self.warmup)
+        self.mqtts.subscriber.subscribe([self.mqtts.subscriber.topics.actions])
+        self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.gcc)
+        self.is_running = True
         LOGGER.info(f"INFO: DRL Agent warmup {self.warmup} sec is finished, starting...")
 
         self.manager.reset(is_load_last_model)
