@@ -15,6 +15,7 @@ from utils.base import LOGGER, wait_for_condition
 class MqttGstWebrtcAppTopics:
     gcc: str = "gstwebrtcapp/gcc"
     stats: str = "gstwebrtcapp/stats"
+    state: str = "gstwebrtcapp/state"
     actions: str = "gstwebrtcapp/actions"
 
 
@@ -124,6 +125,7 @@ class MqttSubscriber(MqttClient):
         config: MqttConfig = MqttConfig(""),
     ) -> None:
         super().__init__(config)
+
         self.message_queues: Dict[str, asyncio.Queue] = {}
         for f in fields(self.topics):
             self.message_queues[getattr(self.topics, f.name)] = asyncio.Queue()
@@ -132,6 +134,8 @@ class MqttSubscriber(MqttClient):
                 ext_topic = getattr(self.external_topics, f.name)
                 if ext_topic:
                     self.message_queues[ext_topic] = asyncio.Queue()
+
+        self.subscriptions = []
 
     def on_message(self, _, __, msg) -> None:
         payload = json.loads(msg.payload.decode('utf8'))
@@ -144,7 +148,7 @@ class MqttSubscriber(MqttClient):
         if msg.topic not in self.message_queues:
             self.message_queues[msg.topic] = asyncio.Queue()
         self.message_queues[msg.topic].put_nowait(mqtt_message)
-        LOGGER.debug(f"Received message: {payload}")
+        LOGGER.debug(f"INFO: MQTT subscriber {self.id} has received message: {payload} from topic {msg.topic}")
 
     def subscribe(self, topics: List[str], qos: int = 1) -> None:
         if not self.is_running:
@@ -152,12 +156,14 @@ class MqttSubscriber(MqttClient):
         for topic in topics:
             self.client.subscribe(topic, qos=qos)
             self.client.on_message = self.on_message
+            self.subscriptions.append(topic)
             LOGGER.info(f"OK: MQTT subscriber {self.id} has successfully subscribed to {topic}")
 
     def get_message(self, topic: str) -> MqttMessage | None:
         queue = self.message_queues.get(topic, None)
         if queue is None:
             LOGGER.error(f"ERROR: No message queue for topic {topic}")
+            return None
         if self.is_running and not queue.empty():
             return queue.get_nowait()
         return None
@@ -165,9 +171,16 @@ class MqttSubscriber(MqttClient):
     def clean_message_queue(self, topic: str) -> None:
         queue = self.message_queues.get(topic, None)
         if queue is None:
-            LOGGER.error(f"ERROR: No message queue for topic {topic}")
+            return
         while not queue.empty():
             _ = queue.get_nowait()
+
+    def stop(self) -> None:
+        self.client.unsubscribe(self.subscriptions)
+        for topic in self.subscriptions:
+            self.clean_message_queue(topic)
+        self.subscriptions.clear()
+        super().stop()
 
 
 @dataclass
