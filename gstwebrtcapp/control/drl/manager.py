@@ -88,6 +88,7 @@ class DrlManager:
             max_episodes=self.episodes,
             state_update_interval=self.config.state_update_interval,
             max_inactivity_time=self.config.state_max_inactivity_time,
+            is_reset_episodes=self.config.is_reset_episodes,
         )
 
         # initialize SB3 DRL model

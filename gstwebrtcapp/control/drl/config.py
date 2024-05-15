@@ -12,6 +12,7 @@ class DrlConfig:
     :param model_name: The name of the DRL model
     :param episodes: The number of episodes to run
     :param episode_length: The number of steps per episode
+    :param is_reset_episodes: Whether to reset the episodes counter on reset
     :param state_update_interval: The interval between the state updates in seconds
     :param state_max_inactivity_time: The maximum time in seconds to wait for the state update. If exceeded, the episode is terminated
     :param hyperparams_cfg: Hyperparameters configuration: either a path to a json gile or a dictionary. Nullable
@@ -28,6 +29,7 @@ class DrlConfig:
     model_name: str = 'sac'
     episodes: int = 30
     episode_length: int = 512
+    is_reset_episodes: bool = False
     state_update_interval: float = 1.0
     state_max_inactivity_time: float = 60.0
     hyperparams_cfg: str | Dict[str, Any] | None = None
