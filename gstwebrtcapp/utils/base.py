@@ -268,12 +268,17 @@ def get_min_diff_in_list(input_list: List[int | float]) -> int | float:
 
 
 # I/O
-def extract_network_traces_from_csv(csv_file: str, aggregation_interval: int = 1) -> Tuple[List[float], float]:
+def extract_network_traces_from_csv(
+    csv_file: str,
+    is_skip_zeroes: bool = True,
+    aggregation_interval: int = 1,
+) -> Tuple[List[float], float]:
     """
     Extract aggregated bandwidth values from the csv file. The original interval is assumed to be 1 second.
     Csv file should contain two columns: bandwidth values and units.
 
     :param csv_file: csv file with bandwidth values
+    :param is_skip_zeroes: skip zero values
     :param aggregation_interval: aggregation interval
     :return: aggregated bandwidth values and out-of-coverage rate
     """
@@ -284,11 +289,14 @@ def extract_network_traces_from_csv(csv_file: str, aggregation_interval: int = 1
 
     for _, row in df.iterrows():
         if row[1] == 'Kbits/sec':
-            bandwidth = float(row[0]) / 1e3
+            bandwidth = float(row[0]) / 1000
         elif row[1] == 'bits/sec':
-            bandwidth = float(row[0]) / 1e6
+            bandwidth = float(row[0]) / 1000000
         else:
             bandwidth = float(row[0])
+
+        if is_skip_zeroes and bandwidth == 0:
+            continue
 
         if bandwidth < 1:
             ooc_count += 1

@@ -33,6 +33,7 @@ class NetworkController:
         interface: str = "eth0",
         scenario_weights: List[float] | None = None,
         additional_rule_str: str = "",  # either --delay ..., or --loss ...
+        is_stop_after_no_rule: bool = False,
         log_path: str | None = None,
         warmup: float = 10.0,
     ) -> None:
@@ -40,6 +41,7 @@ class NetworkController:
         self.gt_bandwidth = gt_bandwidth
         self.interface = interface
         self._update_weights(scenario_weights)
+        self.is_stop_after_no_rule = is_stop_after_no_rule
         self.additional_rule_str = additional_rule_str
         self.warmup = warmup
 
@@ -63,7 +65,10 @@ class NetworkController:
                         rule = self.rules.pop(0)
                         self._apply_rule(rule)
                     else:
-                        self._apply_rule(self._generate_rule(self._get_scenario()))
+                        if self.is_stop_after_no_rule:
+                            raise asyncio.CancelledError
+                        else:
+                            self._apply_rule(self._generate_rule(self._get_scenario()))
                 if self.log_path is not None:
                     self._save_rule_to_csv()
                 await asyncio.sleep(random.uniform(*self.interval))
@@ -111,7 +116,7 @@ class NetworkController:
         self.rules = []
         for network_trace in network_traces:
             for bw_value in network_trace.values:
-                bw_value = max(bw_value, 8e-6)
+                bw_value = max(bw_value, 0.1)
                 self.rules.append(f"rate {bw_value}Mbps")
 
     def _apply_rule(self, rule: str) -> None:
