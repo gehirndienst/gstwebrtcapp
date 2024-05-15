@@ -16,15 +16,15 @@ class CsvViewerRecorderAgent(Agent):
     def __init__(
         self,
         mqtt_config: MqttConfig,
+        id: str = "recorder",
         stats_update_interval: float = 1.0,
-        warmup: float = 3.0,
-        log_path: str = "./logs",
         max_inactivity_time: float = 5.0,
+        log_path: str = "./logs",
+        warmup: float = 3.0,
         verbose: int = 0,
     ) -> None:
-        super().__init__(mqtt_config)
+        super().__init__(mqtt_config, id, warmup)
         self.stats_update_interval = stats_update_interval
-        self.warmup = warmup
         self.log_path = log_path
         self.max_inactivity_time = max_inactivity_time
         self.verbose = min(verbose, 2)
@@ -38,8 +38,6 @@ class CsvViewerRecorderAgent(Agent):
         self.csv_file = None
         self.csv_handler = None
         self.csv_writer = None
-
-        self.is_running = False
 
     def run(self, _) -> None:
         super().run()
@@ -188,7 +186,6 @@ class CsvViewerRecorderAgent(Agent):
     def stop(self) -> None:
         super().stop()
         LOGGER.info("INFO: stopping Csv Viewer Recorder agent...")
-        self.is_running = False
         if self.csv_handler is not None:
             self.csv_handler.close()
             self.csv_handler = None

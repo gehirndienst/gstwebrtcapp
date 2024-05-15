@@ -147,9 +147,6 @@ class MDP(metaclass=ABCMeta):
                         self.max_rb_packetslost = rb_packetslost
                         return True
 
-    def is_terminated(self, step: int) -> bool:
-        return False
-
     def is_truncated(self, step) -> bool:
         return step >= self.episode_length
 

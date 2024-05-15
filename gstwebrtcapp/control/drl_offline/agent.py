@@ -20,19 +20,18 @@ class DrlOfflineAgent(Agent):
         drl_offline_config: DrlOfflineConfig,
         mdp: MDP,
         mqtt_config: MqttConfig,
+        id: str = "drl_offline",
         warmup: float = 20.0,
     ) -> None:
-        super().__init__(mqtt_config)
+        super().__init__(mqtt_config, id, warmup)
 
         self.drl_offline_config = drl_offline_config
         self.mdp = mdp
-        self.warmup = warmup
         self.type = AgentType.DRL_OFFLINE
 
         self.model = None
         self.env = None
         self.is_episode_done = False
-        self.is_running = False
 
     def run(self, _) -> None:
         super().run()
@@ -57,7 +56,6 @@ class DrlOfflineAgent(Agent):
     def stop(self) -> None:
         super().stop()
         self.is_episode_done = True
-        self.is_running = False
         LOGGER.info("INFO: stopping DrlOffline agent...")
 
     def _setup(self) -> None:
@@ -86,5 +84,4 @@ class DrlOfflineAgent(Agent):
 
     def _to_d3rlpy_state(self, state: OrderedDict[str, Any]) -> np.ndarray:
         concatenated_values = np.array([v for values_list in state.values() for v in values_list])
-        # return np.expand_dims(concatenated_values, axis=0).astype(np.float32)
         return concatenated_values.astype(np.float32)
