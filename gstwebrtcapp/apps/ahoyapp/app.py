@@ -99,7 +99,7 @@ class AhoyApp(GstWebRTCApp):
         self.get_transceivers()
 
         # set priority (DSCP marking)
-        self.set_priority()
+        self.set_priority(self.priority)
 
         # set resolution, framerate, bitrate and fec percentage
         self.set_resolution(self.resolution["width"], self.resolution["height"])
@@ -158,9 +158,9 @@ class AhoyApp(GstWebRTCApp):
                     raise GSTWEBRTCAPP_EXCEPTION("can't get any single transceiver from webrtcbin")
             return self.transceivers
 
-    def set_priority(self) -> None:
+    def set_priority(self, priority: int) -> None:
         # set priority to the sender. Corresponds to 8, 0, 36, 38 DSCP values.
-        match self.priority:
+        match priority:
             case 1:
                 wrtc_priority_type = GstWebRTC.WebRTCPriorityType.VERY_LOW
             case 2:
@@ -173,9 +173,8 @@ class AhoyApp(GstWebRTCApp):
                 wrtc_priority_type = GstWebRTC.WebRTCPriorityType.LOW
         sender = self.transceivers[0].get_property("sender")
         if sender is not None:
-            # NOTE: it produces a warning but it is a buggy introspection of a C assertion, so it's safe to ignore
-            sender.set_property("priority", wrtc_priority_type)
-            LOGGER.info(f"OK: set priority (DSCP marking) to {self.priority}, min 1, max 4")
+            sender.set_priority(wrtc_priority_type)
+            LOGGER.info(f"OK: set priority (DSCP marking) to {priority}, min 1, max 4")
         else:
             raise GSTWEBRTCAPP_EXCEPTION("can't set priority, sender is None")
 

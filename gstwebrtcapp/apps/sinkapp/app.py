@@ -18,7 +18,9 @@ import re
 import gi
 
 gi.require_version('Gst', '1.0')
+gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
+from gi.repository import GstWebRTC
 
 from apps.app import GstWebRTCApp, GstWebRTCAppConfig
 from apps.pipelines import DEFAULT_SINK_PIPELINE
@@ -121,6 +123,9 @@ class SinkApp(GstWebRTCApp):
         except ValueError:
             raise GSTWEBRTCAPP_EXCEPTION("Can't find encoder in the webrtcsink pipeline")
 
+        # set priority to the rtp sender
+        self.set_priority(self.priority)
+
         # set initial values
         self.set_bitrate(self.bitrate)
         self.set_resolution(self.resolution["width"], self.resolution["height"])
@@ -149,6 +154,26 @@ class SinkApp(GstWebRTCApp):
             return Gst.Caps.from_string(
                 f"{enc_part},format=I420,width={self.resolution['width']},height={self.resolution['height']},framerate={self.framerate}/1,"
             )
+
+    def set_priority(self, priority: int) -> None:
+        # set priority to the sender. Corresponds to 8, 0, 36, 38 DSCP values.
+        match priority:
+            case 1:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.VERY_LOW
+            case 2:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.LOW
+            case 3:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.MEDIUM
+            case 4:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.HIGH
+            case _:
+                wrtc_priority_type = GstWebRTC.WebRTCPriorityType.LOW
+        sender = self.transceivers[0].get_property("sender")
+        if sender is not None:
+            sender.set_priority(wrtc_priority_type)
+            LOGGER.info(f"OK: set priority (DSCP marking) to {priority}, min 1, max 4")
+        else:
+            LOGGER.error("ERROR: can't set priority to the sender")
 
     def set_bitrate(self, bitrate_kbps: int) -> None:
         if self.encoder_gst_name.startswith("nv") or self.encoder_gst_name.startswith("x26"):
