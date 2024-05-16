@@ -29,3 +29,11 @@
 * Added a bandwidth estimation element using the Google Congestion Control algorithm. The estimates are so far collected within a deque in the app class.
 * `DrlAgent` and `CsvViewerRecorderAgent` now handle RTCP feedback for each SSRC (viewer) independently.
 * Added many new pipelines for all supported encoders.
+
+## Version 1.2.0 (2024-05-16)
+* Added `SafetyDetector` agent to automatically switch between different control agents (e.g., DRL -> GCC) in case the agent's actions tend to show a negative trend in some statistics, e.g., growing RTT. A `GccAgent` is also introduced and works in active and passive modes.
+* Added MQTT support for the communication between agents and different parts of the application as well as for publishing the statistics. Supports internal and external brokers.
+* Added `NetworkController` class for bandwidth limitation. It allows to train/evaluate the DRL agent with different network conditions.
+* Added new MDP and reward designs for the DRL agent.
+* Improved GStreamer pipeline configuration and the control API. Added new setters for the pipeline elements. Added new pipelines for different encoder elements.
+* Various bug fixes and improvements.
