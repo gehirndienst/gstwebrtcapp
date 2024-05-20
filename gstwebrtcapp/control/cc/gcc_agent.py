@@ -23,7 +23,6 @@ class GccAgent(Agent):
     def run(self, _) -> None:
         super().run()
         time.sleep(self.warmup)
-        # self.mqtts.subscriber.subscribe([self.mqtts.subscriber.topics.gcc])
         self.is_running = True
         LOGGER.info(f"INFO: GccAgent is starting...")
 
@@ -40,6 +39,9 @@ class GccAgent(Agent):
     def stop(self) -> None:
         super().stop()
         LOGGER.info(f"INFO: GccAgent is stopping...")
+
+    def init_subscriptions(self) -> None:
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.gcc])
 
     def enable_actions(self) -> None:
         self.is_actions_enabled = True
