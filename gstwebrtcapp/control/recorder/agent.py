@@ -183,6 +183,9 @@ class CsvViewerRecorderAgent(Agent):
                 self.csv_writer.writerow(stat)
             self.stats = []
 
+    def init_subscriptions(self) -> None:
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])
+
     def stop(self) -> None:
         super().stop()
         LOGGER.info("INFO: stopping Csv Viewer Recorder agent...")

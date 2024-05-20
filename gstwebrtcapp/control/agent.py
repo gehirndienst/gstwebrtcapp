@@ -12,7 +12,7 @@ License:
 
 """
 
-from abc import ABCMeta
+from abc import ABCMeta, abstractmethod
 from enum import Enum
 import secrets
 import threading
@@ -53,8 +53,7 @@ class Agent(metaclass=ABCMeta):
             threading.Thread(target=self.mqtts.publisher.run, daemon=True).start(),
             threading.Thread(target=self.mqtts.subscriber.run, daemon=True).start(),
         ]
-        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.gcc])
-        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])
+        self.init_subscriptions()
 
     def stop(self) -> None:
         self.is_running = False
@@ -65,3 +64,7 @@ class Agent(metaclass=ABCMeta):
                 if t:
                     t.join()
         self.mqtts_threads.clear()
+
+    @abstractmethod
+    def init_subscriptions(self) -> None:
+        pass

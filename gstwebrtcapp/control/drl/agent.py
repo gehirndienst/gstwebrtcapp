@@ -1,5 +1,5 @@
+import enum
 import time
-from typing import Tuple
 
 from control.agent import Agent, AgentType
 from control.drl.config import DrlConfig
@@ -25,7 +25,6 @@ class DrlAgent(Agent):
     def run(self, is_load_last_model: bool = False) -> None:
         super().run()
         time.sleep(self.warmup)
-        self.mqtts.subscriber.subscribe([self.mqtts.subscriber.topics.actions])
         self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.gcc)
         self.is_running = True
         LOGGER.info(f"INFO: DRL Agent warmup {self.warmup} sec is finished, starting...")
@@ -42,3 +41,8 @@ class DrlAgent(Agent):
         super().stop()
         LOGGER.info("INFO: stopping DRL agent...")
         self.manager.stop()
+
+    def init_subscriptions(self) -> None:
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.actions])
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.gcc])
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])

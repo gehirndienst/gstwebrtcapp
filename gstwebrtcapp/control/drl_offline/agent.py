@@ -58,6 +58,10 @@ class DrlOfflineAgent(Agent):
         self.is_episode_done = True
         LOGGER.info("INFO: stopping DrlOffline agent...")
 
+    def init_subscriptions(self) -> None:
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.gcc])
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])
+
     def _setup(self) -> None:
         if not os.path.isfile(self.drl_offline_config.model_file):
             raise FileNotFoundError(f"DrlOfflineAgent: Model file {self.drl_offline_config.model_file} not found!")

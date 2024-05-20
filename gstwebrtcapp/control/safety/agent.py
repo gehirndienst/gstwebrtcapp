@@ -50,7 +50,6 @@ class SafetyDetectorAgent(Agent):
         super().run()
         time.sleep(self.warmup)
         self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.stats)
-        self.mqtts.subscriber.subscribe([self.mqtts.subscriber.topics.state])
         self.is_running = True
         LOGGER.info(f"INFO: SafetyDetectorAgent is starting...")
 
@@ -58,6 +57,10 @@ class SafetyDetectorAgent(Agent):
             final_stats = self._cook_stats()
             if final_stats is not None:
                 self._decide_on_switch(final_stats)
+
+    def init_subscriptions(self) -> None:
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.stats])
+        self.mqtts.subscriber.subscribe([self.mqtt_config.topics.state])
 
     def _cook_stats(self) -> Dict[str, float] | None:
         is_stopped = sleep_until_condition_with_intervals(10, self.switch_update_interval, lambda: not self.is_running)
