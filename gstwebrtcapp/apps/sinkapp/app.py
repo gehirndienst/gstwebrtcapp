@@ -146,7 +146,7 @@ class SinkApp(GstWebRTCApp):
                 enc_part = "video/x-h264"
             case "x265enc":
                 enc_part = "video/x-h265"
-            case "av1nec" | "nvav1enc":
+            case "av1enc" | "nvav1enc":
                 enc_part = "video/x-av1"
             case _:
                 raise GSTWEBRTCAPP_EXCEPTION(f"unknown codec {self.encoder_gst_name}")
