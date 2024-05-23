@@ -146,6 +146,8 @@ class SinkApp(GstWebRTCApp):
                 enc_part = "video/x-h264"
             case "x265enc":
                 enc_part = "video/x-h265"
+            case "av1nec" | "nvav1enc":
+                enc_part = "video/x-av1"
             case _:
                 raise GSTWEBRTCAPP_EXCEPTION(f"unknown codec {self.encoder_gst_name}")
         if is_only_header:
@@ -305,12 +307,12 @@ class SinkApp(GstWebRTCApp):
         LOGGER.info("OK: adding gcc estimator...")
         min_bitrate = (
             self.gcc_settings["min-bitrate"]
-            if "min-bitrate" in self.gcc_settings
+            if self.gcc_settings is not None and "min-bitrate" in self.gcc_settings
             else DEFAULT_GCC_SETTINGS["min-bitrate"]
         )
         max_bitrate = (
             self.gcc_settings["max-bitrate"]
-            if "max-bitrate" in self.gcc_settings
+            if self.gcc_settings is not None and "max-bitrate" in self.gcc_settings
             else DEFAULT_GCC_SETTINGS["max-bitrate"]
         )
         self.gcc.set_property("min-bitrate", min_bitrate)

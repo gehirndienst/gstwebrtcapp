@@ -19,7 +19,7 @@ def get_gst_encoder_name(codec: str, is_cuda: bool = False) -> str:
     elif codec == "vp9":
         return "vp9enc"
     elif codec == "av1":
-        return "av1enc"
+        return "av1enc" if not is_cuda else "nvav1enc"
     else:
         raise ValueError(f"Invalid codec: {codec}")
 
