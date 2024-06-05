@@ -378,8 +378,8 @@ class AhoyConnector:
                     else:
                         match action:
                             case "bitrate":
-                                # add 10% policy: if bitrate difference is less than 10% then don't change it
-                                if abs(self._app.bitrate - msg[action]) / self._app.bitrate > 0.1:
+                                # add 5% policy: if bitrate difference is less than 5% then don't change it
+                                if abs(self._app.bitrate - msg[action]) / self._app.bitrate > 0.05:
                                     self._app.set_bitrate(msg[action])
                             case "resolution":
                                 self._app.set_resolution(msg[action])
