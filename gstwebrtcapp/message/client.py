@@ -18,6 +18,10 @@ class MqttGstWebrtcAppTopics:
     state: str = "gstwebrtcapp/state"
     actions: str = "gstwebrtcapp/actions"
 
+    def nullify(self) -> None:
+        for f in fields(self):
+            setattr(self, f.name, "")
+
 
 @dataclass
 class MqttExternalEstimationTopics:
@@ -43,6 +47,7 @@ class MqttMessage:
     timestamp: str
     id: str
     msg: str
+    source: str
     topic: str
 
 
@@ -103,7 +108,7 @@ class MqttPublisher(MqttClient):
     ) -> None:
         super().__init__(config)
 
-    def publish(self, topic: str, msg: str, id: str = "") -> None:
+    def publish(self, topic: str, msg: str, id: str = "", source: str = "") -> None:
         if not self.is_running:
             wait_for_condition(lambda: self.is_running, 10)
         self.client.publish(
@@ -113,6 +118,7 @@ class MqttPublisher(MqttClient):
                     'timestamp': datetime.now().strftime("%Y-%m-%d-%H_%M_%S_%f")[:-3],
                     'id': id or self.id,
                     'msg': msg,
+                    'source': source,
                 }
             ),
         )
@@ -128,10 +134,12 @@ class MqttSubscriber(MqttClient):
 
         self.message_queues: Dict[str, asyncio.Queue] = {}
         for f in fields(self.topics):
-            self.message_queues[getattr(self.topics, f.name)] = asyncio.Queue()
-        if self.external_topics:
+            topic = getattr(self.topics, f.name, "")
+            if topic:
+                self.message_queues[topic] = asyncio.Queue()
+        if self.external_topics is not None:
             for f in fields(self.external_topics):
-                ext_topic = getattr(self.external_topics, f.name)
+                ext_topic = getattr(self.external_topics, f.name, "")
                 if ext_topic:
                     self.message_queues[ext_topic] = asyncio.Queue()
 
@@ -143,6 +151,7 @@ class MqttSubscriber(MqttClient):
             timestamp=payload['timestamp'],
             id=payload['id'],
             msg=payload['msg'],
+            source=payload['source'],
             topic=msg.topic,
         )
         if msg.topic not in self.message_queues:
@@ -154,10 +163,23 @@ class MqttSubscriber(MqttClient):
         if not self.is_running:
             wait_for_condition(lambda: self.is_running, 10)
         for topic in topics:
-            self.client.subscribe(topic, qos=qos)
-            self.client.on_message = self.on_message
+            if topic:
+                self.client.subscribe(topic, qos=qos)
+                self.client.on_message = self.on_message
+                self._add_subscription(topic)
+                LOGGER.info(f"OK: MQTT subscriber {self.id} has successfully subscribed to {topic}")
+
+    def _add_subscription(self, topic: str) -> None:
+        if topic not in self.subscriptions:
+            self.message_queues[topic] = asyncio.Queue()
             self.subscriptions.append(topic)
-            LOGGER.info(f"OK: MQTT subscriber {self.id} has successfully subscribed to {topic}")
+
+    def unsubscribe(self, topics: List[str]) -> None:
+        for topic in topics:
+            if topic in self.subscriptions:
+                self.client.unsubscribe(topic)
+                _ = self.message_queues.pop(topic, None)
+                self.subscriptions.remove(topic)
 
     def get_message(self, topic: str) -> MqttMessage | None:
         queue = self.message_queues.get(topic, None)
@@ -167,6 +189,19 @@ class MqttSubscriber(MqttClient):
         if self.is_running and not queue.empty():
             return queue.get_nowait()
         return None
+
+    async def await_message(self, topic: str, timeout: float | None = None) -> MqttMessage:
+        queue = self.message_queues.get(topic, None)
+        if queue is None:
+            LOGGER.error(f"ERROR: No message queue for topic {topic}")
+            return None
+        try:
+            if timeout is not None:
+                return await asyncio.wait_for(self.message_queues[topic].get(), timeout)
+            else:
+                return await self.message_queues[topic].get()
+        except asyncio.TimeoutError:
+            return None
 
     def clean_message_queue(self, topic: str) -> None:
         queue = self.message_queues.get(topic, None)
@@ -179,6 +214,7 @@ class MqttSubscriber(MqttClient):
         self.client.unsubscribe(self.subscriptions)
         for topic in self.subscriptions:
             self.clean_message_queue(topic)
+        self.message_queues.clear()
         self.subscriptions.clear()
         super().stop()
 
