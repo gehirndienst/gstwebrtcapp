@@ -48,10 +48,11 @@ class DrlEnv(Env):
     def step(self, action):
         self.steps += 1
         self.last_action = action
-        self.mqtts.publisher.publish(
-            self.mqtts.subscriber.topics.actions,
-            json.dumps(self.mdp.pack_action_for_controller(action)),
-        )
+        if not self.is_finished:
+            self.mqtts.publisher.publish(
+                self.mqtts.subscriber.topics.actions,
+                json.dumps(self.mdp.pack_action_for_controller(action)),
+            )
 
         # get observation (webrtc stats) from the controller
         stats = self._get_observation()
@@ -62,10 +63,11 @@ class DrlEnv(Env):
         # make state from the observation
         state_dict = self.mdp.make_state(stats, action)
         self.state = self._dict_to_gym_space_sample(state_dict)
-        self.mqtts.publisher.publish(
-            self.mqtts.subscriber.topics.state,
-            json.dumps(self.mdp.convert_to_unscaled_state(state_dict)),
-        )
+        if not self.is_finished:
+            self.mqtts.publisher.publish(
+                self.mqtts.subscriber.topics.state,
+                json.dumps(self.mdp.convert_to_unscaled_state(state_dict)),
+            )
 
         self.reward, self.reward_parts = self.mdp.calculate_reward()
 
@@ -183,9 +185,17 @@ class DrlEnv(Env):
         is_terminal = sleep_until_condition_with_intervals(
             10,
             max_waiting_time,
-            lambda: self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.actions) is not None,
+            lambda: self._get_switch_action(),
         )
         return is_terminal
+
+    def _get_switch_action(self) -> bool:
+        action = self.mqtts.subscriber.get_message(self.mqtts.subscriber.topics.actions)
+        if action is None:
+            return False
+        else:
+            a = json.loads(action.msg)
+            return isinstance(a, dict) and "switch" in list(a.keys())
 
     def _on_finish(self) -> None:
         LOGGER.info("WARNING: Interrupted by a finish signal, closing the env...")

@@ -38,9 +38,9 @@ class DrlAgent(Agent):
             raise Exception(f"Unknown DRL mode {self.manager.config.mode}")
 
     def stop(self) -> None:
-        super().stop()
         LOGGER.info("INFO: stopping DRL agent...")
         self.manager.stop()
+        super().stop()
 
     def init_subscriptions(self) -> None:
         self.mqtts.subscriber.subscribe([self.mqtt_config.topics.actions])
