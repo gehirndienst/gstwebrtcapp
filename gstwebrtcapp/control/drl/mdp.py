@@ -100,10 +100,6 @@ class MDP(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def check_observation(self, obs: Dict[str, Any]) -> bool:
-        pass
-
-    @abstractmethod
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
         pass
 
@@ -138,14 +134,21 @@ class MDP(metaclass=ABCMeta):
             if self.first_ssrc is None:
                 return True
             else:
+                # check viewer ssrc
                 if rtp_inbound["ssrc"] == self.first_ssrc:
                     rb_packetslost = rtp_inbound["rb-packetslost"]
                     # assumed that packet lost increases more or less in the same manner
                     if rb_packetslost < self.max_rb_packetslost:
-                        return False
+                        if self.states_made <= 10:
+                            # could be some initial distortions
+                            return True
+                        else:
+                            return False
                     else:
                         self.max_rb_packetslost = rb_packetslost
                         return True
+                else:
+                    return False
 
     def is_truncated(self, step) -> bool:
         return step >= self.episode_length
