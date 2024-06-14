@@ -17,6 +17,7 @@ class MqttGstWebrtcAppTopics:
     stats: str = "gstwebrtcapp/stats"
     state: str = "gstwebrtcapp/state"
     actions: str = "gstwebrtcapp/actions"
+    controller: str = ""
 
     def nullify(self) -> None:
         for f in fields(self):

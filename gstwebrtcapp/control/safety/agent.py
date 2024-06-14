@@ -212,7 +212,6 @@ class SafetyDetectorAgent(Agent):
             self.algo = 1 if self.algo == 0 else 0
             self.mqtts.publisher.publish(self.mqtts.publisher.topics.actions, json.dumps({"switch": self.algo}))
             self.reset()
-            LOGGER.info(f"INFO: AgentSwitcher: Switching agent to {'safe' if self.algo == 0 else 'unsafe'}")
 
     def reset(self) -> None:
         self.last_gst_stats = None

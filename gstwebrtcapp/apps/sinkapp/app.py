@@ -43,6 +43,7 @@ class SinkApp(GstWebRTCApp):
         self.webrtcsink_elements = OrderedDict()
         self.webrtcbin = None
         self.source = None
+        self.signaller = None
         self.gcc = None
         self.gcc_estimated_bitrates = asyncio.Queue()
         self.encoder = None
@@ -184,22 +185,18 @@ class SinkApp(GstWebRTCApp):
             self.encoder.set_property("target-bitrate", bitrate_kbps * 1000)
         else:
             raise GSTWEBRTCAPP_EXCEPTION(f"encoder {self.encoder_gst_name} is not supported")
-
         self.bitrate = bitrate_kbps
-        LOGGER.info(f"ACTION: set bitrate to {self.bitrate} kbps")
 
     def set_resolution(self, width: int, height: int) -> None:
         self.resolution = {"width": width, "height": height}
         self.encoder_caps = self.get_caps()
         self.encoder_capsfilter.set_property("caps", self.encoder_caps)
-        LOGGER.info(f"ACTION: set resolution to {self.resolution['width']}x{self.resolution['height']}")
 
     def set_framerate(self, framerate: int) -> None:
         # FIXME: 25 is hardcoded in a default pipeline. That is reasonable for 99% of streams, make configurable later
         self.framerate = min(25, framerate)
         self.encoder_caps = self.get_caps()
         self.encoder_capsfilter.set_property("caps", self.encoder_caps)
-        LOGGER.info(f"ACTION: set framerate to {self.framerate}")
 
     def set_fec_percentage(self, percentage: int, index: int = -1) -> None:
         if len(self.transceivers) == 0:
@@ -215,7 +212,6 @@ class SinkApp(GstWebRTCApp):
                 transceiver.set_property("fec-percentage", percentage)
 
         self.fec_percentage = percentage
-        LOGGER.info(f"ACTION: set fec percentage to {percentage}")
 
     # additional setter to set fully custom encoder caps
     def set_encoder_caps(self, caps_dict: dict) -> None:
@@ -282,6 +278,11 @@ class SinkApp(GstWebRTCApp):
                 'deep-element-added',
                 self._cb_get_all_elements,
             )
+
+            # get signaller
+            self.signaller = self.webrtcsink.get_property("signaller")
+            if not self.signaller:
+                raise GSTWEBRTCAPP_EXCEPTION("Can't get signaller from the webrtcsink")
 
     ## get all encoders to tweak their properties later
     def _cb_encoder_setup(self, _, __, ___, enc):

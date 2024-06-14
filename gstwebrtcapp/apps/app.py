@@ -28,7 +28,7 @@ from gi.repository import GstWebRTC
 
 from apps.pipelines import DEFAULT_BIN_PIPELINE
 from media.preset import VideoPreset
-from utils.base import LOGGER, GSTWEBRTCAPP_EXCEPTION, wait_for_condition
+from utils.base import LOGGER, GSTWEBRTCAPP_EXCEPTION, async_wait_for_condition, wait_for_condition
 from utils.gst import DEFAULT_GCC_SETTINGS, get_gst_encoder_name
 
 
@@ -298,3 +298,20 @@ class GstWebRTCApp(metaclass=ABCMeta):
             self.bus.post(Gst.Message.new_application(None, Gst.Structure.new_empty("post-init")))
         else:
             LOGGER.error("ERROR: can't send post-init message to the pipeline's bus, bus is None")
+
+    async def async_connect_signal(
+        self,
+        attribute_name: str,
+        signal: str,
+        callback: Callable,
+        condition: Callable | None = None,
+    ) -> None:
+        if condition is not None:
+            await async_wait_for_condition(condition, self.max_timeout)
+        attr = getattr(self, attribute_name, None)
+        if attr is None:
+            LOGGER.error(
+                f"ERROR: can't connect signal {signal} to callback {callback.__name__}, {attribute_name} is None"
+            )
+            return
+        attr.connect(signal, callback)

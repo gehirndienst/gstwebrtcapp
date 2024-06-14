@@ -214,8 +214,15 @@ class AhoyConnector:
             elif "streamStopRequest" in msg:
                 # streamStopRequest is received when the stream is stopped on the Ahoy side
                 if msg["streamStopRequest"]["feedUuid"] == self.feed_name:
-                    LOGGER.info(f"INFO: SIGNALLING CHANNEL received streamStopRequest {msg}")
-                    self.terminate_webrtc_coro(is_restart_webrtc_coro=True)
+                    if self.is_running:
+                        LOGGER.info(f"INFO: SIGNALLING CHANNEL received streamStopRequest {msg}")
+                        if self.mqtts.publisher.is_running and self.mqtt_config.topics.controller:
+                            # if it is terminated by the UI, notify the controller
+                            self.mqtts.publisher.publish(
+                                self.mqtt_config.topics.controller,
+                                json.dumps({self.feed_name: {"off": False}}),
+                            )
+                        self.terminate_webrtc_coro(is_restart_webrtc_coro=True)
             else:
                 LOGGER.info(f"INFO: SIGNALLING CHANNEL received currently unhandled message {msg}")
 
@@ -362,7 +369,8 @@ class AhoyConnector:
         while self.is_running:
             await asyncio.sleep(0.1)
             promise = Gst.Promise.new_with_change_func(self._on_get_webrtcbin_stats, None, None)
-            self._app.webrtcbin.emit('get-stats', None, promise)
+            if self._app and self._app.webrtcbin:
+                self._app.webrtcbin.emit('get-stats', None, promise)
         LOGGER.info(f"OK: WEBRTCBIN STATS HANDLER IS OFF!")
 
     async def handle_actions(self) -> None:
@@ -381,14 +389,32 @@ class AhoyConnector:
                                 # add 5% policy: if bitrate difference is less than 5% then don't change it
                                 if abs(self._app.bitrate - msg[action]) / self._app.bitrate > 0.05:
                                     self._app.set_bitrate(msg[action])
+                                    LOGGER.info(f"ACTION: feed {self.feed_name} set bitrate to {msg[action]}")
                             case "resolution":
-                                self._app.set_resolution(msg[action])
+                                if isinstance(msg[action], dict) and "width" in msg[action] and "height" in msg[action]:
+                                    self._app.set_resolution(msg[action]['width'], msg[action]['height'])
+                                    LOGGER.info(
+                                        f"ACTION: feed {self.feed_name} set resolution to {msg[action]['width']}x{msg[action]['height']}"
+                                    )
+                                else:
+                                    LOGGER.error(f"ERROR: Resolution action has invalid value: {msg[action]}")
                             case "framerate":
                                 self._app.set_framerate(msg[action])
+                                LOGGER.info(f"ACTION: feed {self.feed_name} set framerate to {msg[action]}")
+                            case "fec":
+                                self._app.set_fec_percentage(msg[action])
+                                LOGGER.info(f"ACTION: feed {self.feed_name} set FEC % to {msg[action]}")
                             case "preset":
                                 self._app.set_preset(get_video_preset(msg[action]))
+                                LOGGER.info(f"ACTION: feed {self.feed_name} set preset to {msg[action]}")
                             case "switch":
                                 self._switch_agents(msg[action])
+                                LOGGER.info(
+                                    f"ACTION: feed {self.feed_name} switched agent to {'safe' if msg[action] == 0 else 'unsafe'}"
+                                )
+                            case "off":
+                                if msg[action]:
+                                    self.terminate_webrtc_coro()
                             case _:
                                 LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
         LOGGER.info(f"OK: ACTION HANDLER IS OFF!")
@@ -429,6 +455,13 @@ class AhoyConnector:
                 # start network controller's task
                 network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
                 tasks.append(network_controller_task)
+            if self.mqtt_config.topics.controller:
+                # notify controller that the feed is on
+                LOGGER.info(f"OK: Feed {self.feed_name} is on, notifying the controller...")
+                self.mqtts.publisher.publish(
+                    self.mqtt_config.topics.controller,
+                    json.dumps({self.feed_name: {"on": self.mqtt_config.topics.actions}}),
+                )
             #######################################################################################
             self.webrtc_coro_control_task = asyncio.create_task(asyncio.sleep(float('inf')))
             tasks = [self.webrtc_coro_control_task, *tasks]
@@ -504,6 +537,7 @@ class AhoyConnector:
                 self._app.terminate_pipeline()
         if self.webrtc_coro_control_task is not None:
             self.webrtc_coro_control_task.cancel()
+            self.webrtc_coro_control_task = None
 
     def _prepare_agents(self, agents: List[Agent] | None) -> None:
         if agents is not None:

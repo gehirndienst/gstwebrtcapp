@@ -12,7 +12,6 @@ License:
 """
 
 import asyncio
-from collections import deque
 import json
 import re
 import threading
@@ -73,12 +72,17 @@ class SinkConnector:
         self._app = None
         self.is_running = False
 
+        self.webrtc_coro_control_task = None
+
     async def webrtc_coro(self) -> None:
         try:
             self._app = SinkApp(self.pipeline_config)
             if self._app is None:
                 raise Exception("SinkApp object is None!")
             self._app.webrtcsink.set_property("meta", Gst.Structure.new_from_string(f"meta,name={self.feed_name}"))
+            await self._app.async_connect_signal(
+                "signaller", "consumer-removed", self._cb_removing_peer, lambda: self._app.signaller is not None
+            )
             self.is_running = True
         except Exception as e:
             LOGGER.error(f"ERROR: Failed to create SinkApp object, reason:\n {str(e)}")
@@ -99,6 +103,7 @@ class SinkConnector:
             webrtcsink_stats_task = asyncio.create_task(self.handle_webrtcsink_stats())
             actions_task = asyncio.create_task(self.handle_actions())
             be_task = asyncio.create_task(self.handle_bandwidth_estimations())
+            #######################################################################################
             tasks = [pipeline_task, post_init_pipeline_task, webrtcsink_stats_task, actions_task, be_task]
             if self.agents:
                 # start agent threads
@@ -110,10 +115,41 @@ class SinkConnector:
                 # start network controller's task
                 network_controller_task = asyncio.create_task(self.network_controller.update_network_rule())
                 tasks.append(network_controller_task)
+            if self.mqtt_config.topics.controller:
+                # notify controller that the feed is on
+                LOGGER.info(f"OK: Feed {self.feed_name} is on, notifying the controller...")
+                self.mqtts.publisher.publish(
+                    self.mqtt_config.topics.controller,
+                    json.dumps({self.feed_name: {"on": self.mqtt_config.topics.actions}}),
+                )
             #######################################################################################
-            await asyncio.gather(*tasks)
-
+            self.webrtc_coro_control_task = asyncio.create_task(asyncio.sleep(float('inf')))
+            await asyncio.gather(*tasks, self.webrtc_coro_control_task)
+        except asyncio.exceptions.CancelledError as e:
+            if not self.is_running:
+                try:
+                    await async_wait_for_condition(lambda: not self._app.is_running, 5)
+                except Exception:
+                    LOGGER.error("ERROR: Failed to stop the pipeline gracefully, force stopping...")
+                for task in tasks:
+                    task.cancel()
+                if self.agent_threads:
+                    self._terminate_agents()
+                self.mqtts.publisher.stop()
+                self.mqtts.subscriber.stop()
+                for t in self.mqtts_threads:
+                    if t:
+                        t.join()
+                self._app = None
+                # NOTE: it is restarted via the external wrapper
+                return
+            else:
+                raise Exception(str(e))
         except Exception as e:
+            try:
+                await async_wait_for_condition(lambda: not self._app.is_running, 5)
+            except Exception:
+                LOGGER.error("ERROR: Failed to stop the pipeline gracefully, force stopping...")
             self.terminate_webrtc_coro()
             for task in tasks:
                 task.cancel()
@@ -136,13 +172,16 @@ class SinkConnector:
         await async_wait_for_condition(lambda: self._app.webrtcsink_elements, timeout_sec=self._app.max_timeout)
         self._app.send_post_init_message_to_bus()
 
-    def terminate_webrtc_coro(self) -> None:
-        self.is_running = False
+    def terminate_webrtc_coro(self, is_restart_webrtc_coro: bool = False) -> None:
+        self.is_running = not is_restart_webrtc_coro
         if self._app is not None:
             if self._app.is_running:
                 self._app.send_termination_message_to_bus()
             else:
                 self._app.terminate_pipeline()
+        if self.webrtc_coro_control_task is not None:
+            self.webrtc_coro_control_task.cancel()
+            self.webrtc_coro_control_task = None
 
     async def handle_webrtcsink_stats(self) -> None:
         LOGGER.info(f"OK: WEBRTCSINK STATS HANDLER IS ON -- ready to check for stats")
@@ -182,14 +221,32 @@ class SinkConnector:
                                 # add 5% policy: if bitrate difference is less than 5% then don't change it
                                 if abs(self._app.bitrate - msg[action]) / self._app.bitrate > 0.05:
                                     self._app.set_bitrate(msg[action])
+                                    LOGGER.info(f"ACTION: feed {self.feed_name} set bitrate to {msg[action]}")
                             case "resolution":
-                                self._app.set_resolution(msg[action])
+                                if isinstance(msg[action], dict) and "width" in msg[action] and "height" in msg[action]:
+                                    self._app.set_resolution(msg[action]['width'], msg[action]['height'])
+                                    LOGGER.info(
+                                        f"ACTION: feed {self.feed_name} set resolution to {msg[action]['width']}x{msg[action]['height']}"
+                                    )
+                                else:
+                                    LOGGER.error(f"ERROR: Resolution action has invalid value: {msg[action]}")
                             case "framerate":
                                 self._app.set_framerate(msg[action])
+                                LOGGER.info(f"ACTION: feed {self.feed_name} set framerate to {msg[action]}")
+                            case "fec":
+                                self._app.set_fec_percentage(msg[action])
+                                LOGGER.info(f"ACTION: feed {self.feed_name} set FEC % to {msg[action]}")
                             case "preset":
                                 self._app.set_preset(get_video_preset(msg[action]))
+                                LOGGER.info(f"ACTION: feed {self.feed_name} set preset to {msg[action]}")
                             case "switch":
                                 self._switch_agents(msg[action])
+                                LOGGER.info(
+                                    f"ACTION: feed {self.feed_name} switched agent to {'safe' if msg[action] == 0 else 'unsafe'}"
+                                )
+                            case "off":
+                                if msg[action]:
+                                    self.terminate_webrtc_coro()
                             case _:
                                 LOGGER.error(f"ERROR: Unknown action in the message: {msg}")
 
@@ -199,6 +256,19 @@ class SinkConnector:
             gcc_bw = await self._app.gcc_estimated_bitrates.get()
             self.mqtts.publisher.publish(self.mqtt_config.topics.gcc, str(gcc_bw))
         LOGGER.info(f"OK: BANDWIDTH ESTIMATIONS HANDLER IS OFF!")
+
+    def _cb_removing_peer(self, _, __, webrtcbin) -> None:
+        LOGGER.info("OK: end session is received, pending the connector's coroutine...")
+        # if connector receives a direct message in a handler, it will trigger termination before this callback occurs
+        if self.is_running:
+            if self.mqtt_config.topics.controller:
+                # if it is terminated by the UI, notify the controller.
+                # set the value to False, otherwise the controller will send an "off" message here again
+                self.mqtts.publisher.publish(
+                    self.mqtt_config.topics.controller,
+                    json.dumps({self.feed_name: {"off": False}}),
+                )
+            self.terminate_webrtc_coro(is_restart_webrtc_coro=True)
 
     def _prepare_agents(self, agents: List[Agent] | None) -> None:
         if agents is not None:
