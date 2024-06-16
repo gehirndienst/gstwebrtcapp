@@ -81,7 +81,11 @@ class SinkConnector:
                 raise Exception("SinkApp object is None!")
             self._app.webrtcsink.set_property("meta", Gst.Structure.new_from_string(f"meta,name={self.feed_name}"))
             await self._app.async_connect_signal(
-                "signaller", "consumer-removed", self._cb_removing_peer, lambda: self._app.signaller is not None
+                attribute_name="signaller",
+                signal="consumer-removed",
+                callback=self._cb_removing_peer,
+                condition=lambda: self._app.signaller is not None,
+                timeout=-1,
             )
             self.is_running = True
         except Exception as e:

@@ -305,9 +305,10 @@ class GstWebRTCApp(metaclass=ABCMeta):
         signal: str,
         callback: Callable,
         condition: Callable | None = None,
+        timeout: int | None = None,
     ) -> None:
         if condition is not None:
-            await async_wait_for_condition(condition, self.max_timeout)
+            await async_wait_for_condition(condition, timeout or self.max_timeout)
         attr = getattr(self, attribute_name, None)
         if attr is None:
             LOGGER.error(

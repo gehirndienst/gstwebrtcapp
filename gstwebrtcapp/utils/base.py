@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import numpy as np
 import pandas as pd
@@ -30,7 +31,7 @@ def wait_for_condition(
     Wait for condition_func to return True or timeout_sec is reached
 
     :param condition_func: callable that returns bool
-    :param timeout_sec: timeout in seconds
+    :param timeout_sec: timeout in seconds. -1 means no timeout
     :param sleeping_time_sec: meanwhile sleeping time in seconds
     :return: True if condition_func returned True, False otherwise
     :raises TimeoutError: if timeout_sec is reached
@@ -38,7 +39,10 @@ def wait_for_condition(
     start_time = time.time()
     while not condition_func():
         if time.time() - start_time >= float(timeout_sec) and timeout_sec >= 0:
-            raise TimeoutError(f"Timeout {timeout_sec} sec is reached for condition {condition_func.__name__}")
+            raise TimeoutError(
+                f"wait_for_condition:"
+                f"Timeout {timeout_sec} sec is reached for condition {inspect.getsource(condition_func)}"
+            )
         time.sleep(sleeping_time_sec)
     return True
 
@@ -52,7 +56,7 @@ async def async_wait_for_condition(
     Asynchronously wait for condition_func to return True or timeout_sec is reached
 
     :param condition_func: callable that returns bool
-    :param timeout_sec: timeout in seconds
+    :param timeout_sec: timeout in seconds. -1 means no timeout
     :param sleeping_time_sec: meanwhile sleeping time in seconds
     :return: True if condition_func returned True, False otherwise
     :raises TimeoutError: if timeout_sec is reached
@@ -60,7 +64,10 @@ async def async_wait_for_condition(
     start_time = time.time()
     while not condition_func():
         if time.time() - start_time >= float(timeout_sec) and timeout_sec >= 0:
-            raise TimeoutError(f"Timeout {timeout_sec} sec is reached for condition {condition_func.__name__}")
+            raise TimeoutError(
+                f"async_wait_for_condition:"
+                f"Timeout {timeout_sec} sec is reached for condition {inspect.getsource(condition_func)}"
+            )
         await asyncio.sleep(sleeping_time_sec)
     return True
 
