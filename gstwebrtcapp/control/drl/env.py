@@ -25,14 +25,12 @@ class DrlEnv(Env):
         max_episodes: int = -1,
         state_update_interval: float = 1.0,
         max_inactivity_time: float = 20.0,
-        is_reset_episodes: bool = False,
     ):
         self.mdp = mdp
         self.mqtts = mqtts
         self.max_episodes = max_episodes
         self.state_update_interval = state_update_interval
         self.max_inactivity_time = max_inactivity_time
-        self.is_reset_episodes = is_reset_episodes
 
         self.episodes = 1
         self.steps = 0
@@ -95,9 +93,6 @@ class DrlEnv(Env):
             self.is_finished = True
         elif options.get("reset_after_break", None) is not None:
             self.is_finished = False
-
-        if self.is_reset_episodes:
-            self.episodes = 1
 
         self.state = self._get_initial_state()
 

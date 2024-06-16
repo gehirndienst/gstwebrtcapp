@@ -1,12 +1,13 @@
 import csv
 import os
 import time
+import numpy as np
 import torch
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Union
 
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv
 
 from control.drl.config import DrlConfig
 from control.drl.callbacks import (
@@ -36,8 +37,6 @@ class DrlManager:
     :param mqtts: MQTT instances`.
     """
 
-    MAX_EPISODES = 1e9
-
     def __init__(self, config: DrlConfig, mdp: MDP, mqtts: MqttPair):
         self.config = config
         self.mdp = mdp
@@ -56,7 +55,12 @@ class DrlManager:
         self.callbacks = self._set_callbacks(self.config.callbacks)
 
         # set episodes and total (max) timesteps for the process
-        self.episodes = self.config.episodes if self.config.episodes > 0 else DrlManager.MAX_EPISODES
+        self.episodes = self.config.episodes
+        if self.episodes < 0 and self.config.mode == "train":
+            raise Exception(f"ERROR: DrlManager: episodes must be > 0 for training mode!")
+        elif self.episodes == 0:
+            LOGGER.error(f"ERROR: DrlManager: episodes can't be 0, setting to 1 (default)")
+            self.episodes = 1
         self.episode_length = self.config.episode_length
         self.total_timesteps = self.episodes * self.episode_length
         LOGGER.info(
@@ -88,7 +92,6 @@ class DrlManager:
             max_episodes=self.episodes,
             state_update_interval=self.config.state_update_interval,
             max_inactivity_time=self.config.state_max_inactivity_time,
-            is_reset_episodes=self.config.is_reset_episodes,
         )
 
         # initialize SB3 DRL model
@@ -206,17 +209,67 @@ class DrlManager:
         else:
             callback_step = None
 
+        callback = lambda locals, globals: callback_step.on_step() if callback_step is not None else None
+
         LOGGER.info(
             f"OK: Evaluating {self.config.model_name} model with det={self.deterministic} for"
             f" {self.total_timesteps} steps...\n"
         )
-        episode_rewards, episode_lengths = evaluate_policy(
-            self.model,
-            self.env,
-            n_eval_episodes=self.episodes,
-            deterministic=self.deterministic,
-            callback=lambda locals, globals: callback_step.on_step() if callback_step is not None else None,
-            return_episode_rewards=True,
+
+        # based on stable_baselines3.common.evaluation.evaluate_policy
+        if not isinstance(self.env, VecEnv):
+            # num_envs is always 1
+            self.env = DummyVecEnv([lambda: self.env])  # type: ignore[list-item, return-value]
+            assert self.env.num_envs == 1, "Assertion FAILED: DrlManager.eval: only single env is allowed"
+
+        is_infinite_episodes = False
+        episodes = self.episodes
+        if episodes < 0:
+            # infinite episodes but the env will be resetted after each episode_length steps or on terminal state
+            episodes = 1
+            is_infinite_episodes = True
+        episodes_passed = 0
+        episode_rewards = []
+        episode_lengths = []
+        current_reward = 0.0
+        current_length = 0
+
+        observations = self.env.reset()
+        hidden_states = None
+        episode_starts = np.ones((self.env.num_envs,), dtype=bool)
+        while episodes_passed < episodes:
+            actions, hidden_states = self.model.predict(
+                observations,  # type: ignore[arg-type]
+                state=hidden_states,
+                episode_start=episode_starts,
+                deterministic=self.deterministic,
+            )
+
+            new_observations, rewards, dones, _ = self.env.step(actions)
+
+            reward = rewards[0]
+            done = dones[0]
+            episode_starts[0] = done
+            current_reward += reward
+            current_length += 1
+
+            if callback is not None:
+                callback(locals(), globals())
+
+            if done:
+                episode_rewards.append(current_reward)
+                episode_lengths.append(current_length)
+                if not is_infinite_episodes:
+                    episodes_passed += 1
+                current_reward = 0.0
+                current_length = 0
+
+            observations = new_observations
+
+        LOGGER.info(
+            f"OK: Evaluation is finished for {len(episode_rewards)} episodes! min_reward: "
+            f"{min(episode_rewards)}, max_reward: {max(episode_rewards)}, "
+            f"mean_reward: {np.mean(episode_rewards)}, std_reward: {np.std(episode_rewards)}"
         )
 
         if self.config.verbose == 2:

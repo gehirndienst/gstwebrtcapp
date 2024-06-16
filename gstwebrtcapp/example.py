@@ -269,7 +269,6 @@ async def test_agent_switching():
             model_name="sac",
             episodes=episodes,
             episode_length=episode_length,
-            is_reset_episodes=True,
             state_update_interval=stats_update_interval,
             state_max_inactivity_time=60.0,
             deterministic=True,
