@@ -157,7 +157,10 @@ class DrlManager:
     def reset(self, is_load_last_model: bool = False) -> None:
         """reset the manager after breaking the training"""
 
-        self.env.reset(options={"reset_after_break": True})
+        if isinstance(self.env, VecEnv):
+            self.env.envs[0].reset(options={"reset_after_break": True})
+        else:
+            self.env.reset(options={"reset_after_break": True})
 
         if (
             is_load_last_model
@@ -178,8 +181,10 @@ class DrlManager:
 
     def stop(self) -> None:
         """stop the manager and the env"""
-
-        self.env.is_finished = True
+        if isinstance(self.env, VecEnv):
+            self.env.set_attr("is_finished", True)
+        else:
+            self.env.is_finished = True
 
     def train(self) -> None:
         """train the model"""
@@ -247,6 +252,9 @@ class DrlManager:
 
             new_observations, rewards, dones, _ = self.env.step(actions)
 
+            if self.env.get_attr("is_finished")[0]:
+                break
+
             reward = rewards[0]
             done = dones[0]
             episode_starts[0] = done
@@ -266,11 +274,12 @@ class DrlManager:
 
             observations = new_observations
 
-        LOGGER.info(
-            f"OK: Evaluation is finished for {len(episode_rewards)} episodes! min_reward: "
-            f"{min(episode_rewards)}, max_reward: {max(episode_rewards)}, "
-            f"mean_reward: {np.mean(episode_rewards)}, std_reward: {np.std(episode_rewards)}"
-        )
+        if episode_rewards:
+            LOGGER.info(
+                f"OK: Evaluation is finished for {len(episode_rewards)} episodes! min_reward: "
+                f"{min(episode_rewards)}, max_reward: {max(episode_rewards)}, "
+                f"mean_reward: {np.mean(episode_rewards)}, std_reward: {np.std(episode_rewards)}"
+            )
 
         if self.config.verbose == 2:
             eval_path = os.path.join(
