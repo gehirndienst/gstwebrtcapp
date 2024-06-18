@@ -3,7 +3,7 @@ import copy
 import enum
 import json
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from utils.base import LOGGER, wait_for_condition
@@ -23,6 +23,7 @@ class FeedController:
         controller_topic: str | None = None,
         aggregation_topic: str | None = None,
         allocation_weights: Dict[str, float] = {},
+        action_limits: Dict[str, Tuple[float, float]] = {},
         max_inactivity_time: float = 10.0,
         warmup: float = 0.0,
     ) -> None:
@@ -45,7 +46,7 @@ class FeedController:
 
         self.allocation_weights = {}
         self._init_allocation_weights(allocation_weights)
-
+        self.action_limits = action_limits
         self.max_inactivity_time = max_inactivity_time
         self.warmup = warmup
 
@@ -69,11 +70,25 @@ class FeedController:
                         f"ERROR: FeedController: invalid action format: {type(feed_action_dict)} but should be a dict of a dict"
                     )
                     self.is_running = False
-                elif not all([k in self.feeds for k in feed_action_dict.keys()]):
+                elif not all([k in self.feeds or k == "all" for k in feed_action_dict.keys()]):
                     LOGGER.error(f"ERROR: FeedController: unknown feed name in the actions: {feed_action_dict.keys()}")
                     self.is_running = False
                 else:
                     for feed_name, action_dict in feed_action_dict.items():
+                        # NOTE: fix "all" feed name for actions for all feeds
+                        if feed_name == "all":
+                            for action_name, action_value in action_dict.items():
+                                match action_name:
+                                    case "weights":
+                                        # pass it in a form of {"all": {"weights": {feed_name: weight, ...}}}
+                                        self.update_allocation_weights(action_value)
+                                        LOGGER.info(f"ACTION: updated weights for all feeds: {self.allocation_weights}")
+                                    case _:
+                                        LOGGER.error(
+                                            f"ERROR: FeedController : Unknown general action with the name: {action_name}"
+                                        )
+                            continue
+                        # INDIVIDUAL ACTIONS
                         for action_name, action_value in action_dict.items():
                             match action_name:
                                 case "bitrate" | "resolution" | "framerate" | "preset" | "switch":
@@ -81,12 +96,6 @@ class FeedController:
                                     self.mqtts.publisher.publish(
                                         self.feed_topics[feed_name],
                                         json.dumps({action_name: action_value}),
-                                    )
-                                case "weight":
-                                    # FIXME: maybe allow only all weights to be updated at once
-                                    self.update_allocation_weights({feed_name: action_value})
-                                    LOGGER.info(
-                                        f"ACTION: feed {feed_name} has been updated with a new weight: {action_value}"
                                     )
                                 case "manual":
                                     # pass "manual": True/False
@@ -118,9 +127,7 @@ class FeedController:
                                         f"ACTION: feed {feed_name} has been turned on, controlled feeds are: {self.controlled_feed_topics}"
                                     )
                                 case _:
-                                    LOGGER.error(
-                                        f"ERROR: FeedController : Unknown action in the message: {action_name}"
-                                    )
+                                    LOGGER.error(f"ERROR: FeedController : Unknown action with the name: {action_name}")
             except Exception as e:
                 raise Exception(f"ERROR: FeedController has thrown an exception: reason {e}")
 
@@ -180,6 +187,8 @@ class FeedController:
             action_key: sum([actions[feed_name][action_key] for feed_name in actions])
             for action_key in actions[list(actions.keys())[0]]
         }
+
+        # initial allocation based on weights
         allocated_actions = {
             feed_name: {
                 action_key: summed_actions[action_key] * self.allocation_weights[feed_name]
@@ -187,6 +196,40 @@ class FeedController:
             }
             for feed_name in self.controlled_feed_topics
         }
+
+        # adjust allocations to respect min and max limits if provided
+        for action_key in summed_actions:
+            if action_key in self.action_limits:
+                min_limit, max_limit = self.action_limits[action_key]
+                while True:
+                    adjustment_value = 0.0
+                    max_feeds = []
+                    min_feeds = []
+                    for feed_name in self.controlled_feed_topics:
+                        allocated = allocated_actions[feed_name][action_key]
+                        if allocated > max_limit:
+                            adjustment_value += allocated - max_limit
+                            allocated_actions[feed_name][action_key] = max_limit
+                            max_feeds.append(feed_name)
+                        elif allocated < min_limit:
+                            adjustment_value -= min_limit - allocated
+                            allocated_actions[feed_name][action_key] = min_limit
+                            min_feeds.append(feed_name)
+
+                    if adjustment_value != 0.0:
+                        no_more_feeds = min_feeds if adjustment_value < 0.0 else max_feeds
+                        remaining_feeds = [feed for feed in self.controlled_feed_topics if feed not in no_more_feeds]
+                        if remaining_feeds:
+                            remaining_weight_denom = sum([self.allocation_weights[feed] for feed in remaining_feeds])
+                            for feed_name in remaining_feeds:
+                                weight = self.allocation_weights[feed_name] / remaining_weight_denom
+                                allocated_actions[feed_name][action_key] += adjustment_value * weight
+                        else:
+                            # should not be reachable as the AI agent should also follow the same limits
+                            break
+                    else:
+                        break
+
         # publish allocated actions to the feeds' connectors listening for them
         for feed_name, feed_topic in self.controlled_feed_topics.items():
             self.mqtts.publisher.publish(feed_topic, json.dumps(allocated_actions[feed_name]))
@@ -247,10 +290,7 @@ class FeedController:
 
     def update_allocation_weights(self, weights: Dict[str, float]) -> None:
         if sum(weights.values()) > 1.0:
-            LOGGER.error(f"ERROR: FeedController: sum of weights is greater than 1")
-            return
-        elif sum(weights.values()) != 1.0 and len(self.controlled_feed_topics) == len(weights):
-            LOGGER.error(f"ERROR: FeedController: sum of weights for all feeds is not equal to 1")
+            LOGGER.error(f"ERROR: FeedController: sum of given weights is greater than 1, cannot update the weights")
             return
         for feed_name, weight in weights.items():
             if feed_name in self.allocation_weights:
@@ -258,8 +298,13 @@ class FeedController:
             else:
                 LOGGER.error(f"ERROR: FeedController: unknown feed name {feed_name} in the weights update")
         # recalculate other weights to keep the sum equal to 1
-        if sum(self.allocation_weights.values()) != 1.0 and len(self.controlled_feed_topics) > len(weights):
-            remaining_weight = (1.0 - sum(weights.values())) / len(self.controlled_feed_topics) - len(weights)
+        if sum(self.allocation_weights.values()) > 1.0 and len(self.controlled_feed_topics) > len(weights):
+            remaining_weight = (1.0 - sum(weights.values())) / (len(self.controlled_feed_topics) - len(weights))
             for feed_name in self.controlled_feed_topics:
                 if feed_name not in weights:
                     self.allocation_weights[feed_name] = remaining_weight
+        elif sum(self.allocation_weights.values()) < 1.0:
+            # acceptable but should be warned
+            LOGGER.warning(
+                f"WARNING: FeedController: sum of weights for all feeds is less than 1: {sum(self.allocation_weights)}"
+            )
