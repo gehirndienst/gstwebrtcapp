@@ -12,7 +12,7 @@ from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, is_same_rtcp
 from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
 
-class CsvViewerRecorderAgent(Agent):
+class RecorderAgent(Agent):
     def __init__(
         self,
         mqtt_config: MqttConfig,
@@ -20,14 +20,16 @@ class CsvViewerRecorderAgent(Agent):
         stats_update_interval: float = 1.0,
         max_inactivity_time: float = 5.0,
         log_path: str = "./logs",
+        stats_publish_topic: str | None = None,
+        verbose: bool = False,
         warmup: float = 3.0,
-        verbose: int = 0,
     ) -> None:
         super().__init__(mqtt_config, id, warmup)
         self.stats_update_interval = stats_update_interval
-        self.log_path = log_path
         self.max_inactivity_time = max_inactivity_time
-        self.verbose = min(verbose, 2)
+        self.log_path = log_path
+        self.stats_publish_topic = stats_publish_topic
+        self.verbose = verbose
         self.type = AgentType.RECORDER
 
         # cooked stats
@@ -45,18 +47,20 @@ class CsvViewerRecorderAgent(Agent):
         # clean the queue from the messages obtained before warmup
         self.mqtts.subscriber.clean_message_queue(self.mqtts.subscriber.topics.stats)
         self.is_running = True
-        LOGGER.info(f"INFO: Csv Viewer Recorder agent warmup {self.warmup} sec is finished, starting...")
+        LOGGER.info(f"INFO: Recorder agent warmup {self.warmup} sec is finished, starting...")
 
         while self.is_running:
             gst_stats_collected = self._fetch_stats()
             if gst_stats_collected is not None:
                 for gst_stats in gst_stats_collected:
                     is_stats = self._select_stats(gst_stats)
-                    if is_stats and self.verbose > 0:
-                        if self.verbose == 1:
-                            LOGGER.info(f"INFO: Browser Recorder agent stats:\n {self.stats[-1]}")
-                        elif self.verbose == 2:
+                    if is_stats:
+                        if self.log_path:
                             self._save_stats_to_csv()
+                        if self.stats_publish_topic:
+                            self.mqtts.publisher.publish(self.stats_publish_topic, json.dumps(self.stats[-1]))
+                        if self.verbose:
+                            LOGGER.info(f"INFO: Recorder agent {self.id} stats:\n {self.stats[-1]}")
 
     def _fetch_stats(self) -> List[MqttMessage] | None:
         time_inactivity_starts = time.time()
@@ -66,7 +70,7 @@ class CsvViewerRecorderAgent(Agent):
             if gst_stats is None:
                 if time.time() - time_inactivity_starts > self.max_inactivity_time:
                     LOGGER.warning(
-                        "WARNING: No stats were pulled from the observation queue after"
+                        "WARNING: Recorder agent: No stats were pulled from the observation queue after"
                         f" {self.max_inactivity_time} sec"
                     )
                     return None
@@ -80,7 +84,7 @@ class CsvViewerRecorderAgent(Agent):
         rtp_inbound = find_stat(gst_stats, GstWebRTCStatsType.RTP_INBOUND_STREAM)
         ice_candidate_pair = find_stat(gst_stats, GstWebRTCStatsType.ICE_CANDIDATE_PAIR)
         if not rtp_outbound or not rtp_inbound or not ice_candidate_pair:
-            LOGGER.info("WARNING: Csv Viewer Recorder agent: no stats were found...")
+            LOGGER.info("WARNING: Recorder agent: no stats were found...")
             return False
 
         # last stats
@@ -112,6 +116,15 @@ class CsvViewerRecorderAgent(Agent):
                 else 0.0
             )
 
+            # fraction loss rate
+            packets_sent_diff = get_stat_diff(rtp_outbound[0], last_rtp_outbound[0], "packets-sent")
+            rb_packetslost_diff = get_stat_diff(rtp_inbound[i], last_rtp_inbound[i], "rb-packetslost")
+            fraction_loss_rate = (
+                rb_packetslost_diff / (packets_sent_diff + rb_packetslost_diff)
+                if packets_sent_diff + rb_packetslost_diff > 0
+                else 0
+            )
+
             ts_diff_sec = get_stat_diff(rtp_outbound[0], last_rtp_outbound[0], "timestamp") / 1000
 
             # fraction tx rate in Mbits
@@ -134,28 +147,21 @@ class CsvViewerRecorderAgent(Agent):
 
             # rtts / jitter
             rtt_ms = ntp_short_format_to_seconds(rtp_inbound_ssrc["rb-round-trip"]) * 1000
-            last_rtt_ms = (
-                ntp_short_format_to_seconds(last_rtp_inbound[i]["rb-round-trip"]) * 1000
-                if 0 <= i < len(last_rtp_inbound)
-                else 0.0
-            )
-            gradient_rtt_ms = rtt_ms - last_rtt_ms
             jitter_ms = clock_units_to_seconds(rtp_inbound_ssrc["rb-jitter"], rtp_outbound[0]["clock-rate"]) * 1000
 
             # opened to extensions
             final_stats = {
                 "timestamp": gst_stats_mqtt.timestamp,
                 "ssrc": ssrc,
-                "fraction_packets_lost": rtp_inbound_ssrc["rb-fractionlost"],
-                "packets_lost": rtp_inbound_ssrc["rb-packetslost"],
-                "loss_rate_%": loss_rate,
+                "burst_lost_packets": rtp_inbound_ssrc["rb-fractionlost"],
+                "lost_packets": rtp_inbound_ssrc["rb-packetslost"],
+                "fraction_loss_rate": fraction_loss_rate,
+                "loss_rate": loss_rate,
                 "ext_highest_seq": rtp_inbound_ssrc["rb-exthighestseq"],
                 "rtt_ms": rtt_ms,
-                "gradient_rtt_ms": gradient_rtt_ms,
                 "jitter_ms": jitter_ms,
                 "nack_count": rtp_outbound[0]["recv-nack-count"],
                 "pli_count": rtp_outbound[0]["recv-pli-count"],
-                "tx_packets": rtp_outbound[0]["packets-sent"],
                 "rx_packets": rtp_outbound[0]["packets-received"],
                 "rx_mbytes": rtp_outbound[0]["bytes-received"] / 1000000,
                 "tx_rate_mbits": tx_rate,
@@ -171,7 +177,7 @@ class CsvViewerRecorderAgent(Agent):
             datetime_now = datetime.now().strftime("%Y-%m-%d-%H_%M_%S_%f")[:-3]
             os.makedirs(self.log_path, exist_ok=True)
             if self.csv_file is None:
-                self.csv_file = os.path.join(self.log_path, f"webrtc_viewer_{datetime_now}.csv")
+                self.csv_file = os.path.join(self.log_path, f"{self.id}_{datetime_now}.csv")
             header = self.stats[-1].keys()
             self.csv_handler = open(self.csv_file, mode="a", newline="\n")
             self.csv_writer = csv.DictWriter(self.csv_handler, fieldnames=header)
@@ -188,7 +194,7 @@ class CsvViewerRecorderAgent(Agent):
 
     def stop(self) -> None:
         super().stop()
-        LOGGER.info("INFO: stopping Csv Viewer Recorder agent...")
+        LOGGER.info("INFO: stopping Recorder agent...")
         if self.csv_handler is not None:
             self.csv_handler.close()
             self.csv_handler = None

@@ -16,7 +16,7 @@ from control.cc.gcc_agent import GccAgent
 from control.drl.agent import DrlAgent
 from control.drl.config import DrlConfig
 from control.drl.mdp import ViewerSeqMDP
-from control.recorder.agent import CsvViewerRecorderAgent
+from control.recorder.agent import RecorderAgent
 from control.safety.agent import SafetyDetectorAgent
 from control.safety.switcher import SwitcherConfig, SwitchingPair
 from message.broker import MosquittoBroker
@@ -58,12 +58,12 @@ async def test_csv_recorder():
 
         stats_update_interval = 1.0
 
-        agent = CsvViewerRecorderAgent(
+        agent = RecorderAgent(
             mqtt_config=MQTT_CFG,
             stats_update_interval=stats_update_interval,
             warmup=20.0,
             log_path="./logs",
-            verbose=2,
+            verbose=False,
         )
 
         conn = AhoyConnector(
@@ -147,12 +147,12 @@ async def test_drl():
             warmup=20.0,
         )
 
-        logger_agent = CsvViewerRecorderAgent(
+        logger_agent = RecorderAgent(
             mqtt_config=MQTT_CFG,
             stats_update_interval=stats_update_interval,
             warmup=20.0,
             log_path="./logs",
-            verbose=2,
+            verbose=False,
         )
 
         conn = AhoyConnector(
