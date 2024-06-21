@@ -1,2 +1,2 @@
 #!/bin/bash
-poetry build -f wheel -o . && pip install --force-reinstall *.whl && rm *.whl
+poetry build -f wheel -o . && pip uninstall gstwebrtcapp -y && pip install *.whl && rm *.whl
