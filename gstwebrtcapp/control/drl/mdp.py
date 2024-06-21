@@ -4,11 +4,11 @@ from gymnasium import spaces
 import numpy as np
 from typing import Any, Dict, OrderedDict, Tuple
 
-from control.drl.reward import RewardFunctionFactory
-from media.preset import VideoPresets
-from utils.base import LOGGER, scale, unscale, get_list_average, slice_list_in_intervals
-from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, get_stat_diff_concat
-from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
+from gstwebrtcapp.control.drl.reward import RewardFunctionFactory
+from gstwebrtcapp.media.preset import VideoPresets
+from gstwebrtcapp.utils.base import LOGGER, scale, unscale, get_list_average, slice_list_in_intervals
+from gstwebrtcapp.utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff, get_stat_diff_concat
+from gstwebrtcapp.utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
 
 class MDP(metaclass=ABCMeta):

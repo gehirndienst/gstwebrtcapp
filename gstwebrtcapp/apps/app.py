@@ -16,7 +16,6 @@ from abc import ABCMeta, abstractmethod
 import asyncio
 from dataclasses import dataclass, field
 import json
-import re
 from typing import Any, Callable, Dict, List
 
 import gi
@@ -26,10 +25,10 @@ gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
 from gi.repository import GstWebRTC
 
-from apps.pipelines import DEFAULT_BIN_PIPELINE
-from media.preset import VideoPreset
-from utils.base import LOGGER, GSTWEBRTCAPP_EXCEPTION, async_wait_for_condition, wait_for_condition
-from utils.gst import DEFAULT_GCC_SETTINGS, get_gst_encoder_name
+from gstwebrtcapp.apps.pipelines import DEFAULT_BIN_PIPELINE
+from gstwebrtcapp.media.preset import VideoPreset
+from gstwebrtcapp.utils.base import LOGGER, GSTWEBRTCAPP_EXCEPTION, async_wait_for_condition, wait_for_condition
+from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS, get_gst_encoder_name
 
 
 @dataclass

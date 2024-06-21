@@ -6,9 +6,9 @@ import numpy as np
 import time
 from typing import Any, Dict, List, OrderedDict
 
-from control.drl.mdp import MDP
-from message.client import MqttPair
-from utils.base import (
+from gstwebrtcapp.control.drl.mdp import MDP
+from gstwebrtcapp.message.client import MqttPair
+from gstwebrtcapp.utils.base import (
     LOGGER,
     sleep_until_condition_with_intervals,
     merge_observations,

@@ -8,7 +8,7 @@ import time
 import paho.mqtt.client as mqtt
 from typing import Dict, List
 
-from utils.base import LOGGER, wait_for_condition
+from gstwebrtcapp.utils.base import LOGGER, wait_for_condition
 
 
 @dataclass

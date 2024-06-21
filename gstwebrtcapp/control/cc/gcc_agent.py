@@ -1,8 +1,9 @@
 import json
 import time
-from control.agent import Agent, AgentType
-from message.client import MqttConfig
-from utils.base import LOGGER, sleep_until_condition_with_intervals
+
+from gstwebrtcapp.control.agent import Agent, AgentType
+from gstwebrtcapp.message.client import MqttConfig
+from gstwebrtcapp.utils.base import LOGGER, sleep_until_condition_with_intervals
 
 
 class GccAgent(Agent):

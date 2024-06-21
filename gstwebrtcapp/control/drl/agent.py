@@ -1,12 +1,11 @@
-import enum
 import time
 
-from control.agent import Agent, AgentType
-from control.drl.config import DrlConfig
-from control.drl.manager import DrlManager
-from control.drl.mdp import MDP
-from message.client import MqttConfig
-from utils.base import LOGGER
+from gstwebrtcapp.control.agent import Agent, AgentType
+from gstwebrtcapp.control.drl.config import DrlConfig
+from gstwebrtcapp.control.drl.manager import DrlManager
+from gstwebrtcapp.control.drl.mdp import MDP
+from gstwebrtcapp.message.client import MqttConfig
+from gstwebrtcapp.utils.base import LOGGER
 
 
 class DrlAgent(Agent):

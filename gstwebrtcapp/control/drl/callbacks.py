@@ -7,7 +7,7 @@ import os
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.vec_env import VecEnv
 
-from utils.base import LOGGER
+from gstwebrtcapp.utils.base import LOGGER
 
 
 class DrlCheckpointCallback(CheckpointCallback):

@@ -2,7 +2,7 @@ import os
 import signal
 import subprocess
 
-from utils.base import LOGGER
+from gstwebrtcapp.utils.base import LOGGER
 
 
 class MosquittoBroker:

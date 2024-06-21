@@ -1,9 +1,9 @@
 import asyncio
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import threading
 from typing import Any, Callable
 
-from utils.base import LOGGER
+from gstwebrtcapp.utils.base import LOGGER
 
 
 async def restart_wrapper(

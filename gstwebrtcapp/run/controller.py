@@ -5,8 +5,8 @@ import json
 import threading
 from typing import Any, Dict, Tuple
 
-from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
-from utils.base import LOGGER, wait_for_condition
+from gstwebrtcapp.message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
+from gstwebrtcapp.utils.base import LOGGER, wait_for_condition
 
 
 class FeedState(enum.Enum):

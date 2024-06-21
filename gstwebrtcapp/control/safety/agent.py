@@ -2,18 +2,18 @@ import json
 import time
 from typing import Any, Dict
 
-from control.agent import Agent, AgentType
-from control.safety.switcher import Switcher, SwitcherConfig
-from message.client import MqttConfig
-from utils.base import (
+from gstwebrtcapp.control.agent import Agent, AgentType
+from gstwebrtcapp.control.safety.switcher import Switcher, SwitcherConfig
+from gstwebrtcapp.message.client import MqttConfig
+from gstwebrtcapp.utils.base import (
     LOGGER,
     merge_observations,
     sleep_until_condition_with_intervals,
     get_list_average,
     slice_list_in_intervals,
 )
-from utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff_concat, is_same_rtcp
-from utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
+from gstwebrtcapp.utils.gst import GstWebRTCStatsType, find_stat, get_stat_diff_concat, is_same_rtcp
+from gstwebrtcapp.utils.webrtc import clock_units_to_seconds, ntp_short_format_to_seconds
 
 
 class SafetyDetectorAgent(Agent):

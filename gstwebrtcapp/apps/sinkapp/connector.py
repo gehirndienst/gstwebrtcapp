@@ -22,15 +22,15 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
 
-from apps.app import GstWebRTCAppConfig
-from apps.sinkapp.app import SinkApp
-from control.agent import Agent, AgentType
-from control.safety.switcher import SwitchingPair
-from media.preset import get_video_preset
-from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
-from network.controller import NetworkController
-from utils.base import LOGGER, async_wait_for_condition
-from utils.gst import stats_to_dict
+from gstwebrtcapp.apps.app import GstWebRTCAppConfig
+from gstwebrtcapp.apps.sinkapp.app import SinkApp
+from gstwebrtcapp.control.agent import Agent, AgentType
+from gstwebrtcapp.control.safety.switcher import SwitchingPair
+from gstwebrtcapp.media.preset import get_video_preset
+from gstwebrtcapp.message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
+from gstwebrtcapp.network.controller import NetworkController
+from gstwebrtcapp.utils.base import LOGGER, async_wait_for_condition
+from gstwebrtcapp.utils.gst import stats_to_dict
 
 
 class SinkConnector:

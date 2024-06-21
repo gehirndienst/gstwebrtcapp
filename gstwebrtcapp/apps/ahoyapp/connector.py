@@ -28,15 +28,15 @@ from gi.repository import Gst
 from gi.repository import GstSdp
 from gi.repository import GstWebRTC
 
-from apps.app import GstWebRTCAppConfig
-from apps.ahoyapp.app import AhoyApp
-from control.agent import Agent, AgentType
-from control.safety.switcher import SwitchingPair
-from media.preset import get_video_preset
-from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
-from network.controller import NetworkController
-from utils.base import LOGGER, wait_for_condition, async_wait_for_condition
-from utils.gst import stats_to_dict
+from gstwebrtcapp.apps.app import GstWebRTCAppConfig
+from gstwebrtcapp.apps.ahoyapp.app import AhoyApp
+from gstwebrtcapp.control.agent import Agent, AgentType
+from gstwebrtcapp.control.safety.switcher import SwitchingPair
+from gstwebrtcapp.media.preset import get_video_preset
+from gstwebrtcapp.message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
+from gstwebrtcapp.network.controller import NetworkController
+from gstwebrtcapp.utils.base import LOGGER, wait_for_condition, async_wait_for_condition
+from gstwebrtcapp.utils.gst import stats_to_dict
 
 
 class AhoyConnector:

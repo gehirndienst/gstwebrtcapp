@@ -22,10 +22,10 @@ gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
 from gi.repository import GstWebRTC
 
-from apps.app import GstWebRTCApp, GstWebRTCAppConfig
-from apps.pipelines import DEFAULT_SINK_PIPELINE
-from utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
-from utils.gst import DEFAULT_GCC_SETTINGS
+from gstwebrtcapp.apps.app import GstWebRTCApp, GstWebRTCAppConfig
+from gstwebrtcapp.apps.pipelines import DEFAULT_SINK_PIPELINE
+from gstwebrtcapp.utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
+from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS
 
 
 class SinkApp(GstWebRTCApp):

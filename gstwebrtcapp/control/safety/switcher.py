@@ -1,8 +1,6 @@
 import collections
 from dataclasses import dataclass
 
-from control.agent import Agent
-
 
 @dataclass
 class SwitcherConfig:

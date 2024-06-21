@@ -17,7 +17,7 @@ from enum import Enum
 import secrets
 import threading
 
-from message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
+from gstwebrtcapp.message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 
 
 class AgentType(Enum):

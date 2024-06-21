@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 from typing import Any, Deque, Dict, OrderedDict, Tuple
 
-from utils.base import get_list_average, get_decay_weights, get_min_diff_in_list
+from gstwebrtcapp.utils.base import get_list_average, get_decay_weights, get_min_diff_in_list
 
 
 class RewardFunction(metaclass=ABCMeta):

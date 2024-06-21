@@ -9,19 +9,19 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv
 
-from control.drl.config import DrlConfig
-from control.drl.callbacks import (
+from gstwebrtcapp.control.drl.config import DrlConfig
+from gstwebrtcapp.control.drl.callbacks import (
     DrlCheckpointCallback,
     DrlEvaluatingCallback,
     DrlPrintStepCallback,
     DrlSaveStepCallback,
     DrlBreakCallback,
 )
-from control.drl.env import DrlEnv
-from control.drl.mconfigurator import DrlModelConfigurator
-from control.drl.mdp import MDP
-from message.client import MqttPair
-from utils.base import LOGGER
+from gstwebrtcapp.control.drl.env import DrlEnv
+from gstwebrtcapp.control.drl.mconfigurator import DrlModelConfigurator
+from gstwebrtcapp.control.drl.mdp import MDP
+from gstwebrtcapp.message.client import MqttPair
+from gstwebrtcapp.utils.base import LOGGER
 
 
 class DrlManager:

@@ -8,8 +8,8 @@ import shlex
 import random
 from typing import List, Tuple
 
-from network.trace import NetworkTrace
-from utils.base import LOGGER, extract_network_traces_from_csv
+from gstwebrtcapp.network.trace import NetworkTrace
+from gstwebrtcapp.utils.base import LOGGER, extract_network_traces_from_csv
 
 
 class NetworkScenario(enum.Enum):

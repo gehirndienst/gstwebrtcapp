@@ -6,12 +6,12 @@ import d3rlpy
 import numpy as np
 import torch
 
-from control.agent import Agent, AgentType
-from control.drl.mdp import MDP
-from control.drl.env import DrlEnv
-from control.drl_offline.config import DrlOfflineConfig
-from message.client import MqttConfig
-from utils.base import LOGGER
+from gstwebrtcapp.control.agent import Agent, AgentType
+from gstwebrtcapp.control.drl.mdp import MDP
+from gstwebrtcapp.control.drl.env import DrlEnv
+from gstwebrtcapp.control.drl_offline.config import DrlOfflineConfig
+from gstwebrtcapp.message.client import MqttConfig
+from gstwebrtcapp.utils.base import LOGGER
 
 
 class DrlOfflineAgent(Agent):
