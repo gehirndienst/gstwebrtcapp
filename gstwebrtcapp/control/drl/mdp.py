@@ -415,14 +415,14 @@ class ViewerMDP(MDP):
             else state
         )
 
-    def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
+    def convert_to_unscaled_action(self, action: np.ndarray) -> np.ndarray:
         return self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"] + (
             (action + 1) * (self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] - self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"]) / 2
         )
 
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
         # here we have only bitrate decisions that come as a 1-size np array in mbps (check create_action_space)
-        return {"bitrate": self.convert_to_unscaled_action(action)[0] * 1000}
+        return {"bitrate": float(self.convert_to_unscaled_action(action)[0] * 1000)}
 
 
 class ViewerSeqMDP(MDP):
@@ -750,14 +750,14 @@ class ViewerSeqMDP(MDP):
             else state
         )
 
-    def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
+    def convert_to_unscaled_action(self, action: np.ndarray) -> np.ndarray:
         return self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"] + (
             (action + 1) * (self.CONSTANTS["MAX_BITRATE_STREAM_MBPS"] - self.CONSTANTS["MIN_BITRATE_STREAM_MBPS"]) / 2
         )
 
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
         # here we have only bitrate decisions that come as a 1-size np array in mbps (check create_action_space)
-        return {"bitrate": self.convert_to_unscaled_action(action)[0] * 1000}
+        return {"bitrate": float(self.convert_to_unscaled_action(action)[0] * 1000)}
 
 
 class ViewerSeqNoBaselineMDP(ViewerSeqMDP):
@@ -1301,7 +1301,7 @@ class ViewerSeqOfflineMDP(MDP):
     def convert_to_unscaled_state(self, state: OrderedDict[str, Any]) -> OrderedDict[str, Any]:
         return state
 
-    def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> np.ndarray | float:
+    def convert_to_unscaled_action(self, action: np.ndarray | float | int) -> float:
         # action comes usually as np array in bps
         if isinstance(action, np.ndarray):
             a = action[0] / 1e6  # mbps
@@ -1313,7 +1313,7 @@ class ViewerSeqOfflineMDP(MDP):
             return a_final * 1e3
 
     def pack_action_for_controller(self, action: Any) -> Dict[str, Any]:
-        return {"bitrate": self.convert_to_unscaled_action(action)}
+        return {"bitrate": float(self.convert_to_unscaled_action(action))}
 
     def update_reward_params(self) -> None:
         super().update_reward_params()
