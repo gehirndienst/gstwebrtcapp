@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "gstwebrtcapp"
-version = "1.0.0"
-description = "\"The python application to stream video from the given source via GStreamer pipeline to the WebRTC client with the possibility of controlling the video quality on the fly\""
+version = "1.3.0"
+description = "\"The python app for video streaming via GStreamer pipelines to the WebRTC client with the ability to control video quality on the fly using AI-/CC-based or fully manual agents\""
 authors = ["Nikita Smirnov <nsm@informatik.uni-kiel.de>"]
 packages = [
     { include = "gstwebrtcapp" }
@@ -9,7 +9,20 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
+
 aiortc = "*"
+uvloop = "*"
+
+torch = ">=2.0.0, !=2.0.1"
+stable-baselines3 = "*"
+sb3-contrib = "*"
+gymnasium = "^0.29.0"
+d3rlpy = ">=2.4.0"
+tensorboard = "*"
+jupyter = "*"
+
+paho-mqtt = "<2.0.0"
+tcconfig = "*"
 
 [tool.poetry.dev-dependencies]
 pytest = "*"
