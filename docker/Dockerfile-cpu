@@ -2,7 +2,7 @@ FROM ubuntu:23.04
 
 ENV PYTHON_VERSION=3.11.9
 
-LABEL description "A docker for playing with GStreamer with all video codecs built (H264/5, VP8/9, AV1) supporting DRL AI stack using CUDA 12"
+LABEL description "A docker for playing with GStreamer with all video codecs built (H264/5, VP8/9, AV1) supporting DRL AI stack using CPU"
 LABEL maintainer "Nikita Smirnov <nsm@informatik.uni-kiel.de>"
 LABEL version "1.1.0"
 
@@ -16,22 +16,6 @@ RUN apt-get update -y && apt-get upgrade -y && DEBIAN_FRONTEND=noninteractive ap
 
 # for building
 RUN ldconfig && pip install --break-system-packages --upgrade pip && pip install --break-system-packages meson ninja
-
-# INSTALL CUDA 12.1 (FOR EACH VERSION ONE NEEDS CUSTOM DRIVER CODES)
-RUN apt-get update -y && apt-get upgrade -y && DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-12 g++-12 && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 10 && update-alternatives --config gcc
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-ubuntu2204.pin && \
-    mv cuda-ubuntu2204.pin /etc/apt/preferences.d/cuda-repository-pin-600 && \
-    wget https://developer.download.nvidia.com/compute/cuda/12.1.0/local_installers/cuda-repo-ubuntu2204-12-1-local_12.1.0-530.30.02-1_amd64.deb && \
-    dpkg -i cuda-repo-ubuntu2204-12-1-local_12.1.0-530.30.02-1_amd64.deb && \
-    cp /var/cuda-repo-ubuntu2204-12-1-local/cuda-*-keyring.gpg /usr/share/keyrings/ && \
-    apt-get update && \
-    apt-get -y install cuda
-ENV CUDA_VERSION=12.1.0
-ENV CUDA_HOME=/usr/local/cuda-12.1
-ENV PATH=${CUDA_HOME}/bin:${PATH}
-ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
-RUN echo "export Thrust_DIR=/usr/local/cuda-12.1/lib64/cmake/thrust" >> ~/.bashrc
 
 # BUILD NETFLIX VMAF (FOR VOQ METRICS)
 RUN git clone https://github.com/Netflix/vmaf.git && \

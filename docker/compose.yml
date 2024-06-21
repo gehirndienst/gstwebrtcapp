@@ -1,0 +1,67 @@
+name: gstreamer
+
+services:
+  gstwebrtcapp-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile-cuda
+      tags:
+        - nsmirnov/gstwebrtcapp:latest
+    image: nsmirnov/gstwebrtcapp:latest
+    networks:
+      - bridge
+    ports:
+      - "9090:9090/udp"
+      - "9090:9090/tcp"
+      - "8443:8443/udp"
+      - "8443:8443/tcp"
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    runtime: nvidia
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: ["tail", "-f", "/dev/null"]
+    profiles:
+      - cuda
+
+  gstwebrtcapp-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile-cpu
+      tags:
+        - nsmirnov/gstwebrtcapp-cpu:latest
+    image: nsmirnov/gstwebrtcapp-cpu:latest
+    networks:
+      - bridge
+    ports:
+      - "9090:9090/udp"
+      - "9090:9090/tcp"
+      - "8443:8443/udp"
+      - "8443:8443/tcp"
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    command: ["tail", "-f", "/dev/null"]
+    profiles:
+      - cpu
+      
+networks:
+  bridge:
+    driver: bridge
