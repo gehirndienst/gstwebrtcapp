@@ -18,14 +18,17 @@ import re
 import gi
 
 gi.require_version('Gst', '1.0')
+gi.require_version('GstRtp', '1.0')
 gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
+from gi.repository import GstRtp
 from gi.repository import GstWebRTC
 
 from gstwebrtcapp.apps.app import GstWebRTCApp, GstWebRTCAppConfig
 from gstwebrtcapp.apps.pipelines import DEFAULT_SINK_PIPELINE
 from gstwebrtcapp.utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER, wait_for_condition
 from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS
+from gstwebrtcapp.utils.webrtc import TWCC_URI
 
 
 class SinkApp(GstWebRTCApp):
@@ -49,6 +52,8 @@ class SinkApp(GstWebRTCApp):
         self.encoder = None
         self.encoder_caps = None
         self.encoder_capsfilter = None
+        self.payloader = None
+        self.twcc_id = None
         self.transceivers = []
         self.bus = None
 
@@ -85,6 +90,11 @@ class SinkApp(GstWebRTCApp):
         self.webrtcsink.connect(
             'encoder-setup',
             self._cb_encoder_setup,
+        )
+
+        self.webrtcsink.connect(
+            'payloader-setup',
+            self._cb_payloader_setup,
         )
 
         # assign video caps directly to the encoder selecting therefore the target encoder
@@ -293,6 +303,34 @@ class SinkApp(GstWebRTCApp):
                 LOGGER.info(f"OK: the target encoder is found: {name}")
             else:
                 LOGGER.info(f"OK: another than {self.encoder_gst_name} encoder is found: {name}")
+        return False
+
+    def _cb_payloader_setup(self, _, __, ___, payloader):
+        if payloader:
+            self.payloader = payloader
+            if self.gcc_settings is not None and self.twcc_id is None:
+                try:
+                    # NOTE: this requires GStreamer 1.24+
+                    extensions = self.payloader.get_property("extensions")
+                    if extensions is not None:
+                        size = Gst.ValueArray.get_size(extensions)
+                        if size > 0:
+                            ids = []
+                            for i in range(Gst.ValueArray.get_size(extensions)):
+                                e = Gst.ValueArray.get_value(extensions, i)
+                                if e.get_uri() == TWCC_URI:
+                                    # transport-cc already exists
+                                    self.twcc_id = e.get_id()
+                                    return False
+                        self.twcc_id = next(i for i in range(len(ids) + 1) if i not in set(ids)) if ids else 1
+                    else:
+                        self.twcc_id = 1
+                except Exception:
+                    extensions = None
+                    self.twcc_id = 1
+                twcc_ext = GstRtp.RTPHeaderExtension.create_from_uri(TWCC_URI)
+                twcc_ext.set_id(self.twcc_id)
+                self.payloader.emit("add-extension", twcc_ext)
         return False
 
     ## get all elements from the webrtcsink pipeline
