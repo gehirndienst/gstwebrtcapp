@@ -20,7 +20,7 @@ try:
 except ImportError:
     uvloop = None
 
-RTSP_URL = "rtsp://192.168.237.1:5541/0554eebe-d674-46b2-b7c4-df88dac3aa2e/0/"  # TODO: set RTSP URL here
+RTSP_URL = None  # TODO: set RTSP URL here
 WARMUP = 10.0
 
 

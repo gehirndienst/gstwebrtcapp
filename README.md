@@ -1,5 +1,5 @@
 # GStreamer WebRTC application
-This repo contains `GstWebRTCApp`: the Python application to stream video feeds from the given RTSP sources via the GStreamer pipeline to two different WebRTC clients with the possibility to control the video quality on the fly in automatic mode using AI/congestion control agents or in manual/rule-based mode via MQTT messaging. AhoyApp streams the source to the AhoyRTC Director WebRTC client maintained by ADDIX GmbH. SinkApp streams to the open-source js WebRTC client maintained by [webrtcsink team](https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs/-/tree/main/net/webrtc?ref_type=heads). Both applications are based on the [GStreamer] framework (https://gstreamer.freedesktop.org/) and use its Python bindings.
+This repo contains `GstWebRTCApp` -- the Python application to stream video feeds from the given RTSP sources via the GStreamer pipeline to two different WebRTC clients with the possibility to control the video quality on the fly in automatic mode using AI/congestion control agents or in manual/rule-based mode via MQTT messaging. AhoyApp streams the source to the AhoyRTC Director WebRTC client maintained by ADDIX GmbH. SinkApp streams to the open-source js WebRTC client maintained by [webrtcsink team](https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs/-/tree/main/net/webrtc?ref_type=heads). Both applications are based on the [GStreamer] framework (https://gstreamer.freedesktop.org/) and use its Python bindings.
 
 AhoyApp uses the low-level **webrtcbin** plugin for streaming, which is a part of the GStreamer WebRTC stack. It also provides custom signaling to connect to the AhoyRTC Director engine and to handle the WebRTC streaming properly. SinkApp uses the **webrtcsink** plugin and connects to the provided JS client that one needs to run together with the signaling server for the webrtcsink plugin. They both require GStreamer >= 1.22 as well as its Python GI bindings (python ^3.11). The application is deployed in a Docker container with all necessary dependencies and configurations (CPU and CUDA environments) to run the application.
 
@@ -18,7 +18,7 @@ The main features of the applications are:
 
 ## Installation
 ### Docker
-Please follow the instructions in the `docker` folder: [Docker README](docker/README.md)
+Please follow the instructions in the docker folder: [Docker README](docker/README.md)
 
 ### GstWebRTCApp
 The source code is copied into the docker image for further development. By default, the project is installed globally with the `install.sh` script. It uses the `poetry` package manager to build the wheel from the source code and install the application with pip for the root user in a container. If you want to install the application into the virtual environment (locally), you can use the following commands after cloning the repo:
@@ -32,7 +32,7 @@ The project has not been published on PyPi nor a wheel is attached to the repo's
 
 ## Usage
 ### Examples
-Go to the `examples` folder: [Examples](examples/README.md)
+Go to the examples folder: [Examples](examples/README.md)
 
 ### MQTT
 You need either an internal or external MQTT broker to run the application. You can deploy an internal broker (installed in the Docker image) with the following command:
