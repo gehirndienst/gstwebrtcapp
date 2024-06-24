@@ -1,3 +1,6 @@
+TWCC_URI = "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
+
+
 def clock_units_to_seconds(clock_units: int, clock_rate: int = 90000) -> float:
     return float(clock_units) / clock_rate
 

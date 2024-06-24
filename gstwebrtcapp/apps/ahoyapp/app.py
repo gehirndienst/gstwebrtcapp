@@ -27,6 +27,7 @@ from gstwebrtcapp.apps.app import GstWebRTCApp, GstWebRTCAppConfig
 from gstwebrtcapp.apps.pipelines import DEFAULT_BIN_PIPELINE
 from gstwebrtcapp.utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER
 from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS
+from gstwebrtcapp.utils.webrtc import TWCC_URI
 
 
 class AhoyApp(GstWebRTCApp):
@@ -125,9 +126,7 @@ class AhoyApp(GstWebRTCApp):
         self.gcc = Gst.ElementFactory.make("rtpgccbwe")
         if not self.gcc:
             raise GSTWEBRTCAPP_EXCEPTION("Can't create rtpgccbwe")
-        twcc_ext = GstRtp.RTPHeaderExtension.create_from_uri(
-            "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
-        )
+        twcc_ext = GstRtp.RTPHeaderExtension.create_from_uri(TWCC_URI)
         twcc_ext.set_id(1)
         self.payloader.emit("add-extension", twcc_ext)
         self.webrtcbin.connect("request-aux-sender", self._cb_add_gcc)
