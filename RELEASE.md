@@ -37,3 +37,14 @@
 * Added new MDP and reward designs for the DRL agent.
 * Improved GStreamer pipeline configuration and the control API. Added new setters for the pipeline elements. Added new pipelines for different encoder elements.
 * Various bug fixes and improvements.
+
+## Version 1.3.0 (2024-06-21)
+* Added `FeedController` class to concurrently control multiple feeds (video streams). The feeds could be automatically controlled by `DrlAgent` or `GccAgent` or switched to the manual mode to control them directly. Added wrappers for restarting the coroutines and running them in a separate thread.
+* Added action allocation for multiple feeds. The weight imprortance of the feed could be updated via the actions sent to the `FeedController`'s aggregation topic.
+* Added weights for each feed that could be dynamically updated via the MQTT. The action values will be adjusted (if given) to the action limits (e.g., 0.4-10 Mbit/s for "bitrate" actions).
+* Updated GStreamer version in the Dockerfile to built it from the source (latest commit in the main branch) with all needed plugins.
+* Added docker compose file to run container as a service and to ease the deployment.
+* Completed python installation and updated the code. Now the app could be installed via poetry (locally) or built as a wheel and installed via pip (globally, use `install.sh` script). Poetry is already installed in the docker environment.
+* Added new tool to tweak the GstWebRTCAPI (webrtcsink js-based webrtc client).
+* Added hardware acceleration for the AV1 codec (nvav1enc plugin).
+* Improved connectors to allow waiting for the feed to be ready. 
