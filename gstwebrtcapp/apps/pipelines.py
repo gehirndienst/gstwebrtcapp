@@ -31,8 +31,8 @@ DEFAULT_H265_IN_WEBRTCBIN_H264_OUT_PIPELINE = '''
 
 DEFAULT_H265_IN_WEBRTCBIN_H264_OUT_CUDA_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
-    rtspsrc name=source location=rtsp://10.10.3.254:554 ! rtph265depay ! h265parse ! avdec_h265 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
-    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! 
+    rtspsrc name=source location=rtsp://10.10.3.254:554 ! rtph265depay ! h265parse ! nvh265dec ! videoconvert ! videoscale ! videorate !  
+    capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! cudaupload ! cudaconvert ! 
     nvh264enc name=encoder preset=low-latency-hq gop-size=60 rc-mode=cbr-ld-hq aud=true bframes=2 zerolatency=true ! 
     rtph264pay name=payloader auto-header-extension=true config-interval=1 mtu=1350 ! 
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
@@ -49,8 +49,8 @@ DEFAULT_WEBRTCBIN_H265_OUT_PIPELINE = '''
 
 DEFAULT_WEBRTCBIN_H265_OUT_CUDA_PIPELINE = '''
     webrtcbin name=webrtc latency=1 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
-    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert !
-    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory),format=I420 ! 
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=10 ! rtph264depay ! h264parse ! nvh264dec ! videoconvert ! videoscale ! videorate !  
+    capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! cudaupload ! cudaconvert ! 
     nvh265enc name=encoder preset=low-latency-hq gop-size=60 rc-mode=cbr-ld-hq aud=true bframes=2 zerolatency=true ! h265parse ! 
     rtph265pay name=payloader auto-header-extension=true config-interval=1 mtu=1350 ! 
     capsfilter name=payloader_capsfilter ! webrtc.
@@ -96,9 +96,9 @@ DEFAULT_WEBRTCBIN_SVTAV1_OUT_PIPELINE = '''
 '''
 
 DEFAULT_BIN_CUDA_PIPELINE = '''
-    webrtcbin name=webrtc latency=10 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
-    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=100 ! queue ! rtph264depay ! h264parse ! nvh264dec ! queue max-size-buffers=0 max-size-time=0 ! videoconvert ! videoscale ! videorate ! cudaupload ! cudaconvert ! 
-    capsfilter name=raw_capsfilter caps=video/x-raw(memory:CUDAMemory) ! queue max-size-buffers=10 ! 
+    webrtcbin name=webrtc latency=0 bundle-policy=max-bundle stun-server=stun://stun.l.google.com:19302
+    rtspsrc name=source location=rtsp://10.10.3.254:554 latency=100 ! queue ! rtph264depay ! h264parse ! nvh264dec ! videoconvert ! videoscale ! videorate !  
+    capsfilter name=raw_capsfilter caps=video/x-raw,format=I420 ! cudaupload ! cudaconvert !
     nvh264enc name=encoder gop_size=-1 preset=low-latency-hq rc-mode=cbr qos=true zerolatency=true ! 
     rtph264pay name=payloader auto-header-extension=true aggregate-mode=zero-latency config-interval=1 mtu=1250 ! 
     capsfilter name=payloader_capsfilter caps="application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264, payload=(int)126" ! webrtc.
