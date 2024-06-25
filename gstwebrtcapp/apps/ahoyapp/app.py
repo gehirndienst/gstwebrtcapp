@@ -26,7 +26,7 @@ from gi.repository import GstWebRTC
 from gstwebrtcapp.apps.app import GstWebRTCApp, GstWebRTCAppConfig
 from gstwebrtcapp.apps.pipelines import DEFAULT_BIN_PIPELINE
 from gstwebrtcapp.utils.base import GSTWEBRTCAPP_EXCEPTION, LOGGER
-from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS
+from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS, DEFAULT_TRANSCIEVER_SETTINGS, get_app_transceiver_properties
 from gstwebrtcapp.utils.webrtc import TWCC_URI
 
 
@@ -97,6 +97,7 @@ class AhoyApp(GstWebRTCApp):
             self.set_gcc()
 
         # get webrtcbin transceivers
+        self.webrtcbin.connect('on-new-transceiver', self._cb_on_new_transceiver)
         self.get_transceivers()
 
         # set priority (DSCP marking)
@@ -145,8 +146,10 @@ class AhoyApp(GstWebRTCApp):
                 while True:
                     transceiver = self.webrtcbin.emit('get-transceiver', index)
                     if transceiver:
-                        transceiver.set_property("do-nack", True)
-                        transceiver.set_property("fec-type", GstWebRTC.WebRTCFECType.ULP_RED)
+                        self.set_app_transceiver_properties(
+                            transceiver=transceiver,
+                            props_dict=get_app_transceiver_properties(self.transceiver_settings),
+                        )
                         self.transceivers.append(transceiver)
                         index += 1
                     else:
@@ -178,46 +181,55 @@ class AhoyApp(GstWebRTCApp):
             raise GSTWEBRTCAPP_EXCEPTION("can't set priority, sender is None")
 
     def get_raw_caps(self) -> Gst.Caps:
-        raw = 'video/x-raw' if not self.is_cuda else 'video/x-raw(memory:CUDAMemory)'
-        s = f"{raw},format=I420,width={self.resolution['width']},height={self.resolution['height']},framerate={self.framerate}/1,"
+        s = f"video/x-raw,format=I420,width={self.resolution['width']},height={self.resolution['height']},framerate={self.framerate}/1,"
         return Gst.Caps.from_string(s)
 
-    def set_bitrate(self, bitrate_kbps: int) -> None:
+    def set_bitrate(self, bitrate_kbps: int) -> bool:
+        if not self.encoder:
+            return False
         if self.encoder_gst_name.startswith("nv") or self.encoder_gst_name.startswith("x26"):
             self.encoder.set_property("bitrate", bitrate_kbps)
-        elif self.encoder_gst_name.startswith("vp"):
+        elif self.encoder_gst_name.startswith("vp") or self.encoder_gst_name.startswith("av1"):
             self.encoder.set_property("target-bitrate", bitrate_kbps * 1000)
-        elif self.encoder_gst_name.startswith("av1"):
-            self.encoder.set_property("target-bitrate", bitrate_kbps)
         else:
             raise GSTWEBRTCAPP_EXCEPTION(f"encoder {self.encoder_gst_name} is not supported")
 
         self.bitrate = bitrate_kbps
+        return True
 
-    def set_resolution(self, width: int, height: int) -> None:
+    def set_resolution(self, width: int, height: int) -> bool:
+        if not self.raw_capsfilter:
+            return False
         self.resolution = {"width": width, "height": height}
         self.raw_caps = self.get_raw_caps()
         self.raw_capsfilter.set_property("caps", self.raw_caps)
+        return True
 
-    def set_framerate(self, framerate: int) -> None:
+    def set_framerate(self, framerate: int) -> bool:
+        if not self.raw_capsfilter:
+            return False
         self.framerate = framerate
         self.raw_caps = self.get_raw_caps()
         self.raw_capsfilter.set_property("caps", self.raw_caps)
+        return True
 
-    def set_fec_percentage(self, percentage: int, index: int = -1) -> None:
-        if len(self.transceivers) == 0:
-            raise GSTWEBRTCAPP_EXCEPTION("there is no transceivers in the pipeline")
+    def set_fec_percentage(self, percentage: int, index: int = -1) -> bool:
+        if not self.transceivers:
+            LOGGER.error("ERROR: there is no transceivers in the pipeline")
+            return False
         if index > 0:
             try:
                 transceiver = self.transceivers[index]
                 transceiver.set_property("fec-percentage", percentage)
             except IndexError:
-                raise GSTWEBRTCAPP_EXCEPTION(f"can't find tranceiver with index {index}")
+                LOGGER.error(f"ERROR: can't find tranceiver with index {index}")
+                return False
         else:
             for transceiver in self.transceivers:
                 transceiver.set_property("fec-percentage", percentage)
 
         self.fec_percentage = percentage
+        return True
 
     def set_encoder_param(self, param: str, value: Any) -> None:
         prop = self.encoder.get_property(param)
@@ -238,6 +250,15 @@ class AhoyApp(GstWebRTCApp):
             LOGGER.info(f"ACTION: set encoder param {param} from {prop} to {self.encoder.get_property(param)}")
         else:
             raise GSTWEBRTCAPP_EXCEPTION(f"Encoder {self.encoder} doesn't have property {param}")
+
+    def _cb_on_new_transceiver(self, _, transceiver) -> None:
+        if transceiver:
+            self.set_app_transceiver_properties(
+                transceiver=transceiver,
+                props_dict=get_app_transceiver_properties(self.transceiver_settings),
+            )
+            self.transceivers.append(transceiver)
+            LOGGER.info(f"OK: got a new transceiver from webrtcbin, total {len(self.transceivers)}")
 
     def _cb_add_gcc(self, _, __) -> Gst.Element:
         min_bitrate = (

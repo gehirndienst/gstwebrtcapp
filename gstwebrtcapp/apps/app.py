@@ -16,6 +16,7 @@ from abc import ABCMeta, abstractmethod
 import asyncio
 from dataclasses import dataclass, field
 import json
+import re
 from typing import Any, Callable, Dict, List
 
 import gi
@@ -28,7 +29,7 @@ from gi.repository import GstWebRTC
 from gstwebrtcapp.apps.pipelines import DEFAULT_BIN_PIPELINE
 from gstwebrtcapp.media.preset import VideoPreset
 from gstwebrtcapp.utils.base import LOGGER, GSTWEBRTCAPP_EXCEPTION, async_wait_for_condition, wait_for_condition
-from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS, get_gst_encoder_name
+from gstwebrtcapp.utils.gst import DEFAULT_GCC_SETTINGS, DEFAULT_TRANSCIEVER_SETTINGS, get_gst_encoder_name
 
 
 @dataclass
@@ -47,10 +48,10 @@ class GstWebRTCAppConfig:
     :param int fec_percentage: Forward error correction percentage. Default is 20.
     :param Dict[str, int] | None gcc_settings: Dictionary containing GCC settings. If None, gcc will not be used.
         Default is {"min-bitrate": 400000, "max-bitrate": 20000000}.
+    :param Dict[str, Any] | None transceiver_settings: Dictionary containing transceiver settings for NACK and FEC. Default both are True.
     :param List[Dict[str, Any]] data_channels_cfgs: List of dictionaries containing data channel configurations.
     :param int priority: priority (DSCP marking) for the sender RTP stream (from 1 to 4). Default is 2 (DSCP 0).
     :param int max_timeout: Maximum timeout for operations in seconds. Default is 60.
-    :param bool is_cuda: Flag indicating whether the pipeline uses CUDA for HA encoding. Currently only H264 is supported. Default is False.
     :param bool is_debug: Flag indicating whether debugging GStreamer logs are enabled. Default is False.
     """
 
@@ -62,10 +63,10 @@ class GstWebRTCAppConfig:
     framerate: int = 20
     fec_percentage: int = 20
     gcc_settings: Dict[str, int] | None = field(default_factory=lambda: DEFAULT_GCC_SETTINGS)
+    transceiver_settings: Dict[str, Any] | None = field(default_factory=lambda: DEFAULT_TRANSCIEVER_SETTINGS)
     data_channels_cfgs: List[Dict[str, Any]] = field(default_factory=lambda: [])
     priority: int = 2
     max_timeout: int = 60
-    is_cuda: bool = False
     is_debug: bool = False
 
 
@@ -78,14 +79,17 @@ class GstWebRTCApp(metaclass=ABCMeta):
         # NOTE: call super().__init__() in the derived classes AFTER declaring their GST instance variables
         self.pipeline_str = config.pipeline_str
         self.video_url = config.video_url
-        self.encoder_gst_name = get_gst_encoder_name(config.codec, config.is_cuda)
-        self.is_cuda = config.is_cuda and config.codec.startswith('h26')  # FIXME: so far only h264/h265 are supported
+        self.encoder_gst_name = get_gst_encoder_name(
+            config.codec,
+            bool(re.search(r'\b(nvh264dec|nvh265dec|nvh264enc|nvh265enc|nvav1enc)\b', self.pipeline_str)),
+        )
 
         self.bitrate = config.bitrate
         self.resolution = config.resolution
         self.framerate = config.framerate
         self.fec_percentage = config.fec_percentage
         self.gcc_settings = config.gcc_settings
+        self.transceiver_settings = config.transceiver_settings
         self.data_channels_cfgs = config.data_channels_cfgs
         self.data_channels = {}
         self.priority = config.priority
@@ -108,47 +112,52 @@ class GstWebRTCApp(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def set_bitrate(self, bitrate: int) -> None:
+    def set_bitrate(self, bitrate: int) -> bool:
         """
         Set the bitrate of the video stream.
 
         :param int bitrate: Bitrate of the video in Kbps.
+        :return: True if the bitrate is set successfully, False otherwise.
         """
         pass
 
     @abstractmethod
-    def set_resolution(self, width: int, height: int) -> None:
+    def set_resolution(self, width: int, height: int) -> bool:
         """
         Set the resolution of the video stream.
 
         :param int width: Width of the video.
         :param int height: Height of the video.
+        :return: True if the resolution is set successfully, False otherwise.
         """
         pass
 
     @abstractmethod
-    def set_framerate(self, framerate: int) -> None:
+    def set_framerate(self, framerate: int) -> bool:
         """
         Set the framerate of the video stream.
 
         :param int framerate: Framerate of the video.
+        :return: True if the framerate is set successfully, False otherwise.
         """
         pass
 
     @abstractmethod
-    def set_fec_percentage(self, percentage: int) -> None:
+    def set_fec_percentage(self, percentage: int) -> bool:
         """
         Set the FEC percentage of the video stream.
 
         :param int percentage: FEC percentage of the video.
+        :return: True if the FEC percentage is set successfully, False otherwise.
         """
         pass
 
-    def set_preset(self, preset: VideoPreset) -> None:
+    def set_preset(self, preset: VideoPreset) -> bool:
         """
         Set the video preset.
 
         :param VideoPreset preset: Video preset.
+        :return: True if the video preset is set successfully, False otherwise.
         """
         LOGGER.info(f"ACTION: set video preset to {preset.name}")
         if preset.width != self.resolution["width"] or preset.height != self.resolution["height"]:
@@ -157,6 +166,21 @@ class GstWebRTCApp(metaclass=ABCMeta):
             self.set_framerate(preset.framerate)
         if preset.bitrate != self.bitrate:
             self.set_bitrate(preset.bitrate)
+
+    def set_app_transceiver_properties(self, transceiver: GstWebRTC.WebRTCRTPTransceiver, props_dict: dict) -> None:
+        """
+        Set the properties of the transceiver collected in self.transceivers.
+        :param Dict[str, Any] props_dict: Dictionary containing the properties to be set.
+        :param int index: Index of the transceiver. Default is -1 (the last).
+        """
+        for key in props_dict:
+            old_prop = transceiver.get_property(key)
+            if old_prop is not None:
+                transceiver.set_property(key, props_dict[key])
+                LOGGER.info(f"ACTION: changed {key} for {transceiver.get_name()} from {old_prop} to {props_dict[key]}")
+            else:
+                LOGGER.error(f"ERROR: can't set {key} for {transceiver.get_name()}, property not found")
+        return True
 
     def is_webrtc_ready(self) -> bool:
         return self.webrtcbin is not None

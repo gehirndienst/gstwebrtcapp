@@ -36,7 +36,7 @@ from gstwebrtcapp.utils.gst import stats_to_dict
 class SinkConnector:
     def __init__(
         self,
-        server: str = "ws://127.0.0.1:8443",
+        signalling_server: str = "",
         pipeline_config: GstWebRTCAppConfig = GstWebRTCAppConfig(),
         agents: List[Agent] | None = None,
         feed_name: str = "gst-stream",
@@ -45,14 +45,15 @@ class SinkConnector:
         switching_pair: SwitchingPair | None = None,
     ):
         self.pipeline_config = pipeline_config
-        if 'signaller::uri' in self.pipeline_config.pipeline_str:
-            self.pipeline_config.pipeline_str, _ = re.subn(
-                r'(signaller::uri=)[^ ]*', f'\\1{server}', self.pipeline_config.pipeline_str
-            )
-        else:
-            self.pipeline_config.pipeline_str, _ = re.subn(
-                r'(webrtcsink[^\n]*)', fr'\1 signaller::uri={server}', self.pipeline_config.pipeline_str
-            )
+        if signalling_server:
+            if 'signaller::uri' in self.pipeline_config.pipeline_str:
+                self.pipeline_config.pipeline_str, _ = re.subn(
+                    r'(signaller::uri=)[^ ]*', f'\\1{signalling_server}', self.pipeline_config.pipeline_str
+                )
+            else:
+                self.pipeline_config.pipeline_str, _ = re.subn(
+                    r'(webrtcsink[^\n]*)', fr'\1 signaller::uri={signalling_server}', self.pipeline_config.pipeline_str
+                )
 
         self.agents = {}
         self.agent_threads = {}
@@ -224,25 +225,25 @@ class SinkConnector:
                             case "bitrate":
                                 # add 5% policy: if bitrate difference is less than 5% then don't change it
                                 if abs(self._app.bitrate - msg[action]) / self._app.bitrate > 0.05:
-                                    self._app.set_bitrate(msg[action])
-                                    LOGGER.info(f"ACTION: feed {self.feed_name} set bitrate to {msg[action]}")
+                                    if self._app.set_bitrate(msg[action]):
+                                        LOGGER.info(f"ACTION: feed {self.feed_name} set bitrate to {msg[action]}")
                             case "resolution":
                                 if isinstance(msg[action], dict) and "width" in msg[action] and "height" in msg[action]:
-                                    self._app.set_resolution(msg[action]['width'], msg[action]['height'])
-                                    LOGGER.info(
-                                        f"ACTION: feed {self.feed_name} set resolution to {msg[action]['width']}x{msg[action]['height']}"
-                                    )
+                                    if self._app.set_resolution(msg[action]['width'], msg[action]['height']):
+                                        LOGGER.info(
+                                            f"ACTION: feed {self.feed_name} set resolution to {msg[action]['width']}x{msg[action]['height']}"
+                                        )
                                 else:
                                     LOGGER.error(f"ERROR: Resolution action has invalid value: {msg[action]}")
                             case "framerate":
-                                self._app.set_framerate(msg[action])
-                                LOGGER.info(f"ACTION: feed {self.feed_name} set framerate to {msg[action]}")
+                                if self._app.set_framerate(msg[action]):
+                                    LOGGER.info(f"ACTION: feed {self.feed_name} set framerate to {msg[action]}")
                             case "fec":
-                                self._app.set_fec_percentage(msg[action])
-                                LOGGER.info(f"ACTION: feed {self.feed_name} set FEC % to {msg[action]}")
+                                if self._app.set_fec_percentage(msg[action]):
+                                    LOGGER.info(f"ACTION: feed {self.feed_name} set FEC % to {msg[action]}")
                             case "preset":
-                                self._app.set_preset(get_video_preset(msg[action]))
-                                LOGGER.info(f"ACTION: feed {self.feed_name} set preset to {msg[action]}")
+                                if self._app.set_preset(get_video_preset(msg[action])):
+                                    LOGGER.info(f"ACTION: feed {self.feed_name} set preset to {msg[action]}")
                             case "switch":
                                 self._switch_agents(msg[action])
                                 LOGGER.info(

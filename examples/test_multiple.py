@@ -130,7 +130,6 @@ def make_default_app_cfg() -> GstWebRTCAppConfig:
         data_channels_cfgs=[],
         priority=4,
         max_timeout=30,
-        is_cuda=False,
         is_debug=False,
     )
 

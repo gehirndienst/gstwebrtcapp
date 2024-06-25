@@ -188,43 +188,56 @@ class SinkApp(GstWebRTCApp):
         else:
             LOGGER.error("ERROR: can't set priority to the sender")
 
-    def set_bitrate(self, bitrate_kbps: int) -> None:
+    def set_bitrate(self, bitrate_kbps: int) -> bool:
+        if not self.encoder:
+            return False
         if self.encoder_gst_name.startswith("nv") or self.encoder_gst_name.startswith("x26"):
             self.encoder.set_property("bitrate", bitrate_kbps)
-        elif self.encoder_gst_name.startswith("vp"):
+        elif self.encoder_gst_name.startswith("vp") or self.encoder_gst_name.startswith("av"):
             self.encoder.set_property("target-bitrate", bitrate_kbps * 1000)
         else:
             raise GSTWEBRTCAPP_EXCEPTION(f"encoder {self.encoder_gst_name} is not supported")
         self.bitrate = bitrate_kbps
+        return True
 
-    def set_resolution(self, width: int, height: int) -> None:
+    def set_resolution(self, width: int, height: int) -> bool:
+        if not self.encoder_capsfilter:
+            return False
         self.resolution = {"width": width, "height": height}
         self.encoder_caps = self.get_caps()
         self.encoder_capsfilter.set_property("caps", self.encoder_caps)
+        return True
 
-    def set_framerate(self, framerate: int) -> None:
+    def set_framerate(self, framerate: int) -> bool:
         # FIXME: 25 is hardcoded in a default pipeline. That is reasonable for 99% of streams, make configurable later
+        if not self.encoder_capsfilter:
+            return False
         self.framerate = min(25, framerate)
         self.encoder_caps = self.get_caps()
         self.encoder_capsfilter.set_property("caps", self.encoder_caps)
+        return True
 
-    def set_fec_percentage(self, percentage: int, index: int = -1) -> None:
-        if len(self.transceivers) == 0:
-            raise GSTWEBRTCAPP_EXCEPTION("there is no transceivers in the pipeline")
+    def set_fec_percentage(self, percentage: int, index: int = -1) -> bool:
+        if not self.transceivers:
+            LOGGER.error("ERROR: there is no transceivers in the pipeline")
+            return False
         if index > 0:
             try:
                 transceiver = self.transceivers[index]
                 transceiver.set_property("fec-percentage", percentage)
             except IndexError:
-                raise GSTWEBRTCAPP_EXCEPTION(f"can't find tranceiver with index {index}")
+                LOGGER.error(f"ERROR: can't find tranceiver with index {index}")
+                return False
         else:
             for transceiver in self.transceivers:
                 transceiver.set_property("fec-percentage", percentage)
-
         self.fec_percentage = percentage
+        return True
 
     # additional setter to set fully custom encoder caps
-    def set_encoder_caps(self, caps_dict: dict) -> None:
+    def set_encoder_caps(self, caps_dict: dict) -> bool:
+        if not self.encoder_capsfilter:
+            return False
         new_caps_str = self.get_sink_video_caps().to_string()
         for key in caps_dict:
             new_caps_str += f",{key}={str(caps_dict[key])}"
@@ -232,17 +245,7 @@ class SinkApp(GstWebRTCApp):
         self.encoder_capsfilter.set_property("caps-change-mode", "delayed")
         self.encoder_capsfilter.set_property("caps", self.encoder_caps)
         LOGGER.info(f"ACTION: set new caps for encoder {self.encoder_caps.to_string()}")
-
-    # additional setter to set fully custom transceiver props
-    def set_webrtc_transceiver(self, props_dict: dict, index: int = -1) -> None:
-        try:
-            transceiver = self.transceivers[index]
-            for key in props_dict:
-                old_prop = transceiver.get_property(key)
-                transceiver.set_property(key, props_dict[key])
-                LOGGER.info(f"ACTION: changed {key} for {transceiver.get_name()} from {old_prop} to {props_dict[key]}")
-        except IndexError:
-            raise GSTWEBRTCAPP_EXCEPTION(f"Can't find tranceiver with index {index}")
+        return True
 
     ################# NOTIFIERS #####################
     ## gcc
