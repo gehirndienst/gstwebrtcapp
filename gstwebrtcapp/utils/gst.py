@@ -1,11 +1,17 @@
 from enum import Enum
 import re
 from typing import Any, Dict, List
+import gi
+
+gi.require_version('Gst', '1.0')
+gi.require_version('GstWebRTC', '1.0')
+from gi.repository import Gst
+from gi.repository import GstWebRTC
 
 
 # encoder
 CODECS = ["h264", "h265", "vp8", "vp9", "av1"]
-GST_ENCODERS = ["x264enc", "nvh264enc", "x265enc", "vp8enc", "vp9enc", "av1enc"]
+GST_ENCODERS = ["x264enc", "nvh264enc", "x265enc", "nvh265enc", "vp8enc", "vp9enc", "av1enc", "nvav1enc"]
 
 
 def get_gst_encoder_name(codec: str, is_cuda: bool = False) -> str:
@@ -13,7 +19,7 @@ def get_gst_encoder_name(codec: str, is_cuda: bool = False) -> str:
     if codec == "h264":
         return "x264enc" if not is_cuda else "nvh264enc"
     elif codec == "h265":
-        return "x265enc"
+        return "x265enc" if not is_cuda else "nvh265enc"
     elif codec == "vp8":
         return "vp8enc"
     elif codec == "vp9":
@@ -27,8 +33,31 @@ def get_gst_encoder_name(codec: str, is_cuda: bool = False) -> str:
 # gcc
 DEFAULT_GCC_SETTINGS = {
     "min-bitrate": 400000,  # 0.4 mbps
-    "max-bitrate": 20000000,  # 20 mbps
+    "max-bitrate": 10000000,  # 10 mbps
 }
+
+# transceiver
+DEFAULT_TRANSCIEVER_SETTINGS = {
+    "nack": True,
+    "fec": True,
+}
+
+
+def get_app_transceiver_properties(transceiver_settings: Dict[str, Any]) -> Dict[str, Any]:
+    do_nack = (
+        transceiver_settings["nack"]
+        if transceiver_settings and "nack" in transceiver_settings
+        else DEFAULT_TRANSCIEVER_SETTINGS["nack"]
+    )
+    do_fec = (
+        transceiver_settings["fec"]
+        if transceiver_settings and "fec" in transceiver_settings
+        else DEFAULT_TRANSCIEVER_SETTINGS["fec"]
+    )
+    return {
+        "do-nack": do_nack,
+        "fec-type": GstWebRTC.WebRTCFECType.ULP_RED if do_fec else GstWebRTC.WebRTCFECType.NONE,
+    }
 
 
 # stats
@@ -125,3 +154,13 @@ def is_same_rtcp(rtp_inbound: Dict[str, Any], last_rtp_inbound: Dict[str, Any] |
             rtp_inbound["rb-round-trip"] == last_rtp_inbound["rb-round-trip"]
             and rtp_inbound["rb-jitter"] == last_rtp_inbound["rb-jitter"]
         )
+
+
+# dump as dot file
+def dump_to_dot(
+    # NOTE: run with GST_DEBUG_DUMP_DOT_DIR=. // convert to png as dot -Tpng filename.dot > filename.png
+    pipeline: Any,
+    params: Gst.DebugGraphDetails = Gst.DebugGraphDetails.FULL_PARAMS,
+    filename: str = "pipeline",
+) -> None:
+    Gst.debug_bin_to_dot_file(pipeline, params, filename)
