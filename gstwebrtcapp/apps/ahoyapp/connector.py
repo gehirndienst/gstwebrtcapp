@@ -36,7 +36,7 @@ from gstwebrtcapp.media.preset import get_video_preset
 from gstwebrtcapp.message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from gstwebrtcapp.network.controller import NetworkController
 from gstwebrtcapp.utils.base import LOGGER, wait_for_condition, async_wait_for_condition
-from gstwebrtcapp.utils.gst import stats_to_dict
+from gstwebrtcapp.utils.gst import GstWebRTCStatsType, find_stat, stats_to_dict
 
 
 class AhoyConnector:
@@ -53,6 +53,7 @@ class AhoyConnector:
     :param MqttConfig mqtt_config: Configuration for the MQTT client.
     :param NetworkController network_controller: Network controller that optionally controls the network rules. Nullable.
     :param SwitchingPair switching_pair: Pair of agents for safety detector and switching. Nullable.
+    :param str share_ice_topic: Topic for sharing ICE candidates. Nullable.
     """
 
     def __init__(
@@ -67,6 +68,7 @@ class AhoyConnector:
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
         switching_pair: SwitchingPair | None = None,
+        share_ice_topic: str | None = None,
     ):
         self.server = server
         self.api_key = api_key
@@ -100,6 +102,8 @@ class AhoyConnector:
         )
         self.mqtts_threads = []
         self.network_controller = network_controller
+        self.share_ice_topic = share_ice_topic
+        self.is_share_ice = False
 
         self.is_running = False
         self.is_locked = True
@@ -328,6 +332,8 @@ class AhoyConnector:
         LOGGER.info(f"INFO: webrtcbin's ICE connecting state has been changed to {self.webrtcbin_ice_connection_state}")
         if self.webrtcbin_ice_connection_state == GstWebRTC.WebRTCICEConnectionState.CONNECTED:
             LOGGER.info("OK: ICE connection is established")
+            if self.share_ice_topic and not self.is_share_ice:
+                self.is_share_ice = True
 
     def _on_get_webrtcbin_stats(self, promise, _, __) -> None:
         assert promise.wait() == Gst.PromiseResult.REPLIED, "FAIL: get webrtcbin stats promise was not replied"
@@ -342,6 +348,18 @@ class AhoyConnector:
                     stats[stat_name] = stats_to_dict(stat_value.to_string())
         else:
             LOGGER.error(f"ERROR: no stats to save...")
+
+        if self.is_share_ice:
+            self.is_share_ice = False
+            icls = find_stat(stats, GstWebRTCStatsType.ICE_CANDIDATE_LOCAL)
+            icrs = find_stat(stats, GstWebRTCStatsType.ICE_CANDIDATE_REMOTE)
+            if icls and icrs:
+                payload = {
+                    "feed_name": self.feed_name,
+                    "ice_candidate_local_stats": icls[0],
+                    "ice_candidate_remote_stats": icrs[0],
+                }
+                self.mqtts.publisher.publish(self.share_ice_topic, json.dumps(payload))
 
         self.mqtts.publisher.publish(self.mqtt_config.topics.stats, json.dumps(stats))
 

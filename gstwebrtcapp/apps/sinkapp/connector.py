@@ -20,7 +20,9 @@ import gi
 
 
 gi.require_version('Gst', '1.0')
+gi.require_version('GstWebRTC', '1.0')
 from gi.repository import Gst
+from gi.repository import GstWebRTC
 
 from gstwebrtcapp.apps.app import GstWebRTCAppConfig
 from gstwebrtcapp.apps.sinkapp.app import SinkApp
@@ -30,7 +32,7 @@ from gstwebrtcapp.media.preset import get_video_preset
 from gstwebrtcapp.message.client import MqttConfig, MqttPair, MqttPublisher, MqttSubscriber
 from gstwebrtcapp.network.controller import NetworkController
 from gstwebrtcapp.utils.base import LOGGER, async_wait_for_condition
-from gstwebrtcapp.utils.gst import stats_to_dict
+from gstwebrtcapp.utils.gst import GstWebRTCStatsType, find_stat, stats_to_dict
 
 
 class SinkConnector:
@@ -43,6 +45,7 @@ class SinkConnector:
         mqtt_config: MqttConfig = MqttConfig(),
         network_controller: NetworkController | None = None,
         switching_pair: SwitchingPair | None = None,
+        share_ice_topic: str | None = None,
     ):
         self.pipeline_config = pipeline_config
         if signalling_server:
@@ -69,6 +72,8 @@ class SinkConnector:
         self.mqtts_threads = []
         self.feed_name = feed_name
         self.network_controller = network_controller
+        self.share_ice_topic = share_ice_topic
+        self.is_share_ice = False
 
         self._app = None
         self.is_running = False
@@ -86,6 +91,13 @@ class SinkConnector:
                 signal="consumer-removed",
                 callback=self._cb_removing_peer,
                 condition=lambda: self._app.signaller is not None,
+                timeout=-1,
+            )
+            await self._app.async_connect_signal(
+                attribute_name="webrtcbin",
+                signal="notify::ice-connection-state",
+                callback=self._cb_ice_connection_state_notify,
+                condition=lambda: self._app.webrtcbin is not None,
                 timeout=-1,
             )
             self.is_running = True
@@ -208,6 +220,18 @@ class SinkConnector:
             if stats:
                 self.mqtts.publisher.publish(self.mqtt_config.topics.stats, json.dumps(stats))
 
+                if self.is_share_ice:
+                    self.is_share_ice = False
+                    icls = find_stat(stats, GstWebRTCStatsType.ICE_CANDIDATE_LOCAL)
+                    icrs = find_stat(stats, GstWebRTCStatsType.ICE_CANDIDATE_REMOTE)
+                    if icls and icrs:
+                        payload = {
+                            "feed_name": self.feed_name,
+                            "ice_candidate_local_stats": icls[0],
+                            "ice_candidate_remote_stats": icrs[0],
+                        }
+                        self.mqtts.publisher.publish(self.share_ice_topic, json.dumps(payload))
+
         LOGGER.info(f"OK: WEBRTCSINK STATS HANDLER IS OFF!")
 
     async def handle_actions(self) -> None:
@@ -274,6 +298,12 @@ class SinkConnector:
                     json.dumps({self.feed_name: {"off": False}}),
                 )
             self.terminate_webrtc_coro(is_restart_webrtc_coro=True)
+
+    def _cb_ice_connection_state_notify(self, pspec, _) -> None:
+        self.webrtcbin_ice_connection_state = self._app.webrtcbin.get_property('ice-connection-state')
+        if self.webrtcbin_ice_connection_state == GstWebRTC.WebRTCICEConnectionState.CONNECTED:
+            if self.share_ice_topic and not self.is_share_ice:
+                self.is_share_ice = True
 
     def _prepare_agents(self, agents: List[Agent] | None) -> None:
         if agents is not None:
